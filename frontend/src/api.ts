@@ -1,3 +1,5 @@
+export { API_BASE };
+
 export type PageDiff = {
   page_index: number;
   status: "changed" | "unchanged" | "added_page" | "removed_page";
@@ -19,7 +21,7 @@ export type CompareResponse = {
   };
 };
 
-const API_BASE = "http://localhost:8000";
+const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8000";
 
 export async function comparePdfs(
   oldFile: File,
@@ -37,7 +39,9 @@ export async function comparePdfs(
   });
 
   if (!response.ok) {
-    throw new Error("Comparison failed");
+    const body = await response.json().catch(() => ({}));
+    const detail = typeof body?.detail === "string" ? body.detail : Array.isArray(body?.detail) ? body.detail.map((o: { msg?: string }) => o?.msg).filter(Boolean).join("; ") : null;
+    throw new Error(detail ?? `Comparison failed (${response.status})`);
   }
 
   return response.json();

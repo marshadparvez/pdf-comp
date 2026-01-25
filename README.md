@@ -43,6 +43,19 @@ pdf/
 
 ## Setup
 
+### System dependencies (required for Accuracy mode)
+
+**Accuracy** mode uses Unstructured’s layout-aware PDF parsing, which needs **poppler** (and its `pdfinfo` tool) installed on your system. **Speed** mode works without it.
+
+| OS | Install command |
+|----|------------------|
+| **macOS** (Homebrew) | `brew install poppler` |
+| **Ubuntu / Debian** | `sudo apt install poppler-utils` |
+| **Fedora** | `sudo dnf install poppler-utils` |
+| **Windows** | [Poppler for Windows](https://github.com/oschwartz10612/poppler-windows/releases) — add the `bin` folder to your PATH |
+
+If poppler is missing and you use Accuracy mode, the compare request will fail with an error about `pdfinfo` or “Is poppler installed and in PATH?”.
+
 ### Backend
 
 1. Navigate to the backend directory:
@@ -87,6 +100,12 @@ npm run dev
 
 The frontend will be available at `http://localhost:5173` (or the port shown in the terminal)
 
+### Frontend configuration
+
+Create `frontend/.env` (see `frontend/.env.example`) and optionally set:
+
+- `VITE_API_BASE` — API root URL (default: `http://localhost:8000`)
+
 ## Usage
 
 1. Open the web application in your browser
@@ -99,12 +118,13 @@ The frontend will be available at `http://localhost:5173` (or the port shown in 
 
 ## API Endpoints
 
-- `GET /health` - Health check endpoint
-- `POST /compare` - Compare two PDFs
+- `GET /health` — Health check endpoint
+- `POST /compare` — Compare two PDFs
   - Form data:
-    - `old_pdf`: First PDF file
-    - `new_pdf`: Second PDF file
-    - `mode`: "speed" or "accuracy" (default: "speed")
+    - `old_pdf`: First PDF file (must be PDF, max 100 MB)
+    - `new_pdf`: Second PDF file (must be PDF, max 100 MB)
+    - `mode`: `"speed"` or `"accuracy"` (default: `"speed"`)
+  - Validation: PDF filename required; file size limit 100 MB. Invalid requests return 400/413 with a clear error message.
 
 ## Performance Targets
 
@@ -112,6 +132,11 @@ The frontend will be available at `http://localhost:5173` (or the port shown in 
 - **Accuracy mode**: ~20 pages/min per document
 
 For very large files (e.g., 800+ pages), Speed mode is recommended by default.
+
+## Recent improvements
+
+- **Frontend**: Configurable API base URL (`VITE_API_BASE`), clearer error messages from the API, similarity shown as %, highlight legend (removed/added/visual), "Compare again" button, selected filenames and mode explanations in the upload form.
+- **Backend**: PDF-only and `mode` validation, 100 MB max file size, upload directory cleanup after each compare, structured logging of job_id, mode, similarity, and low_confidence.
 
 ## License
 
