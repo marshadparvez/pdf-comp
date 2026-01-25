@@ -1,0 +1,94 @@
+Dual-Pipeline PDF Diff Plan
+
+Goal
+
+Deliver a comparison web app that supports two pipelines:
+- Speed (pdfplumber + OCR + OpenCV) for fast processing.
+- Accuracy (Docling + Unstructured + OCR) for better layout and structure fidelity.
+
+Users choose the pipeline via UI. The API returns the selected mode, a mode_explanation, and diff results with annotated PDFs.
+
+Product requirements (minimal)
+
+- Upload two PDFs and choose Speed or Accuracy.
+- Compute text diffs (added/removed/changed words).
+- Compute visual diffs (layout/format changes).
+- Run OCR where pages have little/no extractable text.
+- Return a similarity score with low-confidence warning for unrelated documents.
+- Provide annotated PDFs for download.
+
+Architecture and data flow
+
+User -> WebUI -> API -> Router -> SpeedPipeline/AccuracyPipeline -> DiffEngine -> Report + AnnotatedPDF -> WebUI
+
+Pipeline details
+
+Speed pipeline (baseline)
+- Text extraction: pdfplumber word extraction by page.
+- OCR fallback: Tesseract on page images if word count low.
+- Text diff: SequenceMatcher on word tokens; merge adjacent word boxes.
+- Visual diff: OpenCV absdiff + contours to find change regions.
+
+Accuracy pipeline (layout-aware)
+- Layout parsing: Docling + Unstructured to recover blocks, headings, tables, and reading order.
+- OCR fallback: Tesseract on page images when text is sparse or unreliable.
+- Text diff: Diff at block/line level; map boxes to pages for highlights.
+- Visual diff: Same OpenCV stage for consistency.
+
+Similarity detection (document relatedness)
+
+- Compute global text similarity (token-based).
+- Compute mean visual similarity across pages.
+- Combine into a single similarity_score.
+- Flag low_confidence when the score is below a chosen threshold.
+
+Backend implementation
+
+- Routing: Add mode to /compare (form field).
+- Pipeline router in backend/diff_pipeline.py:
+  - compare_pdfs_speed(...) uses existing logic.
+  - compare_pdfs_accuracy(...) uses Docling + Unstructured extraction + OCR + diff.
+- API contract in backend/app.py:
+  - Accept mode and return mode, mode_explanation, similarity_score, low_confidence, pages, and downloads.
+- Dependencies in backend/requirements.txt:
+  - Add Docling + Unstructured (plus any required extras).
+
+Frontend implementation
+
+- Add pipeline selector to frontend/src/components/UploadForm.tsx.
+- Send mode in frontend/src/api.ts.
+- Display chosen mode + explanation in frontend/src/components/DiffReport.tsx.
+
+UX explanation copy (example)
+
+- Speed: "Fast comparison for large PDFs. Best for quick changes; may miss complex layout shifts."
+- Accuracy: "Deeper layout-aware comparison. Slower but more reliable for complex or mixed PDFs."
+
+Testing and validation
+
+- Update manual check in backend/tests/manual_check.md to run both modes.
+- Validate against:
+  - A text-only PDF pair (should be fast and accurate in both).
+  - A scanned/mixed PDF pair (accuracy mode should win).
+  - Unrelated PDFs (should trigger low-confidence warning).
+
+Performance targets
+
+- Speed mode: target ~60 pages/min per document (best-effort, depends on OCR usage).
+- Accuracy mode: target ~20 pages/min per document (layout-aware parsing is slower).
+- For very large files (e.g., 800 pages), recommend Speed mode by default with an Accuracy override.
+
+Risks and mitigations
+
+- Accuracy pipeline latency: large PDFs will be slow.
+  - Mitigation: show mode explanation and advise Speed for large files.
+- OCR quality variance:
+  - Mitigation: only OCR when text extraction is sparse; keep similarity warning.
+- Dependency size:
+  - Mitigation: install accuracy pipeline deps only when needed (optional in future).
+
+Delivery milestones (minimal)
+
+- Backend router + accuracy pipeline integration.
+- Frontend toggle + mode display.
+- Manual validation for both pipelines.

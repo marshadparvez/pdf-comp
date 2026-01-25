@@ -1,0 +1,44 @@
+Technical terms explained (PDF comparison project)
+
+OCR (Optical Character Recognition)
+- Turns images of text into real, searchable text.
+- Used when a PDF is scanned or image-only (no selectable text).
+
+Tesseract
+- A free OCR engine that reads text from page images.
+- Produces words and their positions on the page.
+
+PDF text extraction (pdfplumber / Docling)
+- Pulls text directly from the PDF when text already exists.
+- Faster and more accurate than OCR for digital PDFs.
+
+Layout parsing (Docling / Unstructured / Layout-Parser)
+- Understands page structure: headings, paragraphs, columns, tables, figures.
+- Helps compare layout changes and improve reading order.
+
+Text diff (SequenceMatcher)
+- Compares words to detect added, removed, or changed text.
+
+Visual diff (OpenCV)
+- Compares rendered page images to find layout/format changes.
+- Detects differences even when text looks similar.
+
+Annotated PDF
+- A new PDF with highlights marking changes.
+- Typically: red for removed, green for added, yellow for visual/layout changes.
+
+Similarity score
+- A combined score that tells how related two PDFs are.
+- Low score means the documents might be unrelated.
+
+Low-confidence warning
+- A flag shown when the PDFs appear too different.
+- Helps avoid misleading comparisons.
+
+Speed mode
+- Faster pipeline for large PDFs.
+- Best for quick changes and digital text.
+
+Accuracy mode
+- Slower but more layout-aware.
+- Better for mixed/scanned PDFs and complex layouts.
