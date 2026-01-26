@@ -136,7 +136,7 @@ export default function App() {
                 PDF Comparison
               </h1>
               <p style={{ margin: 0, color: "#6c757d", fontSize: "1.15rem", fontWeight: 500 }}>
-                Intelligent document analysis with dual-pipeline technology
+                Find and visualize changes between document versions
               </p>
             </div>
           </div>
