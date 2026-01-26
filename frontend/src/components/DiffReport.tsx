@@ -259,103 +259,140 @@ export default function DiffReport({ report, onCompareAgain, oldFileName, newFil
         </div>
       </div>
 
-      {/* Legend */}
+      {/* Highlight Colors Guide - Prominent Section */}
       <div
         style={{
-          display: "flex",
-          gap: "24px",
-          alignItems: "center",
-          flexWrap: "wrap",
-          padding: "20px 24px",
-          background: "linear-gradient(135deg, rgba(102, 126, 234, 0.05), rgba(118, 75, 162, 0.05))",
+          padding: "28px",
+          background: "#f9fafb",
           borderRadius: "12px",
-          border: "2px solid rgba(102, 126, 234, 0.1)",
+          border: "2px solid #e5e7eb",
         }}
       >
-        <span style={{ fontWeight: 700, color: "#495057", fontSize: "1rem" }}>📍 Legend:</span>
-        {[
-          { color: "#dc3545", label: "Removed" },
-          { color: "#28a745", label: "Added" },
-          { color: "#ffc107", label: "Visual Changes" },
-        ].map((item, i) => (
-          <span key={i} style={{ display: "inline-flex", alignItems: "center", gap: "10px" }}>
-            <span
-              style={{
-                width: "20px",
-                height: "20px",
-                background: item.color,
-                borderRadius: "6px",
-                boxShadow: `0 2px 8px ${item.color}40`,
-              }}
-            />
-            <span style={{ color: "#495057", fontSize: "0.95rem", fontWeight: 600 }}>{item.label}</span>
-          </span>
-        ))}
-      </div>
-
-      {/* How to Use Guide */}
-      <div
-        style={{
-          padding: "24px",
-          background: "linear-gradient(135deg, rgba(102, 126, 234, 0.05), rgba(118, 75, 162, 0.05))",
-          borderRadius: "16px",
-          border: "2px solid rgba(102, 126, 234, 0.15)",
-        }}
-      >
-        <h3 style={{ margin: "0 0 16px 0", fontSize: "1.3rem", fontWeight: 700, color: "#212529", display: "flex", alignItems: "center", gap: "10px" }}>
-          <span style={{ fontSize: "1.5em" }}>💡</span>
-          How to Read the Annotated PDFs
+        <h3 style={{ margin: "0 0 20px 0", fontSize: "1.4rem", fontWeight: 700, color: "#111827" }}>
+          What Do the Highlight Colors Mean?
         </h3>
-        <div style={{ display: "grid", gap: "12px", fontSize: "0.95rem", color: "#495057" }}>
-          <div style={{ display: "flex", gap: "12px", alignItems: "flex-start" }}>
+        
+        <div style={{ display: "grid", gap: "16px", marginBottom: "20px" }}>
+          <div style={{ 
+            display: "flex", 
+            gap: "16px", 
+            alignItems: "flex-start",
+            padding: "18px",
+            background: "white",
+            borderRadius: "8px",
+            border: "1px solid #e5e7eb",
+          }}>
             <div style={{ 
-              width: "24px", 
-              height: "24px", 
+              width: "40px", 
+              height: "40px", 
               background: "#dc3545", 
-              borderRadius: "6px", 
+              borderRadius: "8px", 
               flexShrink: 0,
-              boxShadow: "0 2px 6px rgba(220, 53, 69, 0.3)",
-            }} />
-            <div>
-              <strong style={{ color: "#dc3545" }}>Red boxes</strong> highlight content that was <strong>removed</strong> from the original PDF
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: "1.2em",
+              fontWeight: 700,
+              color: "white",
+            }}>
+              🔴
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700, color: "#111827", fontSize: "1.1rem", marginBottom: "6px" }}>
+                Red Highlights = Removed Content
+              </div>
+              <div style={{ color: "#6b7280", fontSize: "0.95rem", lineHeight: "1.6" }}>
+                Appears on the <strong>Original PDF</strong>. Shows text or content that was <strong>deleted or removed</strong> from the original document.
+              </div>
             </div>
           </div>
-          <div style={{ display: "flex", gap: "12px", alignItems: "flex-start" }}>
+
+          <div style={{ 
+            display: "flex", 
+            gap: "16px", 
+            alignItems: "flex-start",
+            padding: "18px",
+            background: "white",
+            borderRadius: "8px",
+            border: "1px solid #e5e7eb",
+          }}>
             <div style={{ 
-              width: "24px", 
-              height: "24px", 
+              width: "40px", 
+              height: "40px", 
               background: "#28a745", 
-              borderRadius: "6px", 
+              borderRadius: "8px", 
               flexShrink: 0,
-              boxShadow: "0 2px 6px rgba(40, 167, 69, 0.3)",
-            }} />
-            <div>
-              <strong style={{ color: "#28a745" }}>Green boxes</strong> show content that was <strong>added</strong> in the updated PDF
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: "1.2em",
+              fontWeight: 700,
+              color: "white",
+            }}>
+              🟢
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700, color: "#111827", fontSize: "1.1rem", marginBottom: "6px" }}>
+                Green Highlights = Added Content
+              </div>
+              <div style={{ color: "#6b7280", fontSize: "0.95rem", lineHeight: "1.6" }}>
+                Appears on the <strong>Updated PDF</strong>. Shows text or content that was <strong>newly added</strong> to the document.
+              </div>
             </div>
           </div>
-          <div style={{ display: "flex", gap: "12px", alignItems: "flex-start" }}>
+
+          <div style={{ 
+            display: "flex", 
+            gap: "16px", 
+            alignItems: "flex-start",
+            padding: "18px",
+            background: "white",
+            borderRadius: "8px",
+            border: "1px solid #e5e7eb",
+          }}>
             <div style={{ 
-              width: "24px", 
-              height: "24px", 
+              width: "40px", 
+              height: "40px", 
               background: "#ffc107", 
-              borderRadius: "6px", 
+              borderRadius: "8px", 
               flexShrink: 0,
-              boxShadow: "0 2px 6px rgba(255, 193, 7, 0.3)",
-            }} />
-            <div>
-              <strong style={{ color: "#ffc107" }}>Yellow boxes</strong> indicate <strong>visual or formatting changes</strong> (layout shifts, styling, etc.)
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: "1.2em",
+              fontWeight: 700,
+              color: "#111827",
+            }}>
+              🟡
+            </div>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700, color: "#111827", fontSize: "1.1rem", marginBottom: "6px" }}>
+                Yellow Highlights = Visual/Formatting Changes
+              </div>
+              <div style={{ color: "#6b7280", fontSize: "0.95rem", lineHeight: "1.6" }}>
+                Appears on <strong>both PDFs</strong>. Indicates <strong>visual or formatting differences</strong> such as text repositioning, layout shifts, font changes, spacing differences, or styling changes where the actual text content is similar but visually different.
+              </div>
             </div>
           </div>
         </div>
+
         <div style={{ 
-          marginTop: "16px", 
-          padding: "12px 16px", 
-          background: "rgba(102, 126, 234, 0.08)", 
+          padding: "16px",
+          background: "#eff6ff",
           borderRadius: "8px",
-          fontSize: "0.9rem",
-          color: "#495057",
+          border: "1px solid #bfdbfe",
         }}>
-          <strong>💡 Pro Tip:</strong> Open both PDFs side-by-side on your computer for easy comparison. Use the page numbers from the summary below to quickly navigate to changed pages.
+          <div style={{ display: "flex", gap: "12px", alignItems: "flex-start" }}>
+            <span style={{ fontSize: "1.2em", flexShrink: 0 }}>💡</span>
+            <div>
+              <div style={{ fontWeight: 600, color: "#1e40af", marginBottom: "4px", fontSize: "0.95rem" }}>
+                How to Use
+              </div>
+              <div style={{ color: "#1e3a8a", fontSize: "0.9rem", lineHeight: "1.5" }}>
+                Download both annotated PDFs and open them side-by-side to easily compare changes. Click any page number in the summary below to jump directly to that page in the PDF previews.
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
