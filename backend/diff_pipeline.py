@@ -324,33 +324,26 @@ def _compare_pdfs(
             # Filter removed boxes: exclude boxes that contain mostly moved words
             filtered_removed = []
             for removed_box in page_diff.removed_boxes:
-                # Check if any words in this box were marked as moved
-                # We approximate by checking if box overlaps with moved word positions
-                # This is heuristic but works well in practice
+                # Check if this box contains words that were moved to another page
                 box_contains_moved = False
                 if old_page_words and moved_old_words:
-                    # Check if removed box likely contains moved words
-                    # Simple heuristic: if box center is near moved words, consider it moved
-                    box_center_x = (removed_box[0] + removed_box[2]) / 2
-                    box_center_y = (removed_box[1] + removed_box[3]) / 2
-                    
-                    # Count moved words near this box
-                    moved_count = 0
-                    total_count = 0
+                    # Find all words that are within this removed box
+                    words_in_box = []
                     for local_idx, word in enumerate(old_page_words):
                         global_idx = old_start_idx + local_idx
-                        if global_idx in moved_old_words:
-                            word_center_x = (word.bbox[0] + word.bbox[2]) / 2
-                            word_center_y = (word.bbox[1] + word.bbox[3]) / 2
-                            # Check if word is within or near the box
-                            if (removed_box[0] <= word_center_x <= removed_box[2] and
-                                removed_box[1] <= word_center_y <= removed_box[3]):
-                                moved_count += 1
-                            total_count += 1
+                        word_center_x = (word.bbox[0] + word.bbox[2]) / 2
+                        word_center_y = (word.bbox[1] + word.bbox[3]) / 2
+                        # Check if word center is within the removed box
+                        if (removed_box[0] <= word_center_x <= removed_box[2] and
+                            removed_box[1] <= word_center_y <= removed_box[3]):
+                            words_in_box.append((local_idx, global_idx, word))
                     
-                    # If >30% of words in box area are moved, consider the box moved
-                    if total_count > 0 and moved_count / total_count > 0.3:
-                        box_contains_moved = True
+                    # Count how many of the words in this box are marked as moved
+                    if words_in_box:
+                        moved_in_box = sum(1 for _, gidx, _ in words_in_box if gidx in moved_old_words)
+                        # If >30% of words in this box are moved, filter it out
+                        if moved_in_box / len(words_in_box) > 0.3:
+                            box_contains_moved = True
                 
                 if not box_contains_moved:
                     filtered_removed.append(removed_box)
@@ -358,25 +351,26 @@ def _compare_pdfs(
             # Filter added boxes similarly
             filtered_added = []
             for added_box in page_diff.added_boxes:
+                # Check if this box contains words that were moved from another page
                 box_contains_moved = False
                 if new_page_words and moved_new_words:
-                    box_center_x = (added_box[0] + added_box[2]) / 2
-                    box_center_y = (added_box[1] + added_box[3]) / 2
-                    
-                    moved_count = 0
-                    total_count = 0
+                    # Find all words that are within this added box
+                    words_in_box = []
                     for local_idx, word in enumerate(new_page_words):
                         global_idx = new_start_idx + local_idx
-                        if global_idx in moved_new_words:
-                            word_center_x = (word.bbox[0] + word.bbox[2]) / 2
-                            word_center_y = (word.bbox[1] + word.bbox[3]) / 2
-                            if (added_box[0] <= word_center_x <= added_box[2] and
-                                added_box[1] <= word_center_y <= added_box[3]):
-                                moved_count += 1
-                            total_count += 1
+                        word_center_x = (word.bbox[0] + word.bbox[2]) / 2
+                        word_center_y = (word.bbox[1] + word.bbox[3]) / 2
+                        # Check if word center is within the added box
+                        if (added_box[0] <= word_center_x <= added_box[2] and
+                            added_box[1] <= word_center_y <= added_box[3]):
+                            words_in_box.append((local_idx, global_idx, word))
                     
-                    if total_count > 0 and moved_count / total_count > 0.3:
-                        box_contains_moved = True
+                    # Count how many of the words in this box are marked as moved
+                    if words_in_box:
+                        moved_in_box = sum(1 for _, gidx, _ in words_in_box if gidx in moved_new_words)
+                        # If >30% of words in this box are moved, filter it out
+                        if moved_in_box / len(words_in_box) > 0.3:
+                            box_contains_moved = True
                 
                 if not box_contains_moved:
                     filtered_added.append(added_box)
