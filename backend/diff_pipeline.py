@@ -186,6 +186,14 @@ def _compare_pdfs(
     old_words_map = old_words_map or {}
     new_words_map = new_words_map or {}
 
+    # First pass: collect all words with page context for cross-page matching
+    old_words_with_page: List[Tuple[WordBox, int]] = []
+    new_words_with_page: List[Tuple[WordBox, int]] = []
+    
+    # Store actual word lists per page for later reference
+    stored_old_words: Dict[int, List[WordBox]] = {}
+    stored_new_words: Dict[int, List[WordBox]] = {}
+
     for page_index in range(max_pages):
         has_old = page_index < old_doc.page_count
         has_new = page_index < new_doc.page_count
@@ -231,9 +239,18 @@ def _compare_pdfs(
         if len(new_words) < 10:
             new_words = _scale_ocr_words(ocr_words_from_image(new_image), new_scale)
 
+        # Store words for later reference
+        stored_old_words[page_index] = old_words
+        stored_new_words[page_index] = new_words
+
+        # Store words with page context for cross-page matching
+        old_words_with_page.extend([(w, page_index) for w in old_words])
+        new_words_with_page.extend([(w, page_index) for w in new_words])
+
         all_old_words.extend(old_words)
         all_new_words.extend(new_words)
 
+        # Page-by-page diff (for initial comparison)
         added_boxes, removed_boxes = diff_word_boxes(old_words, new_words)
 
         visual_boxes = compute_visual_diff_boxes(old_image, new_image)
@@ -249,6 +266,133 @@ def _compare_pdfs(
                 status="changed" if (added_boxes or removed_boxes or visual_boxes) else "unchanged",
             )
         )
+
+    # Second pass: Cross-page matching to detect moved content
+    # This identifies when content moved from one page to another
+    if old_words_with_page and new_words_with_page:
+        # Build word-to-box mappings for each page to track which boxes contain which words
+        old_page_word_indices: Dict[int, List[int]] = {}  # page -> list of global word indices
+        new_page_word_indices: Dict[int, List[int]] = {}
+        
+        for idx, (_, page_idx) in enumerate(old_words_with_page):
+            old_page_word_indices.setdefault(page_idx, []).append(idx)
+        for idx, (_, page_idx) in enumerate(new_words_with_page):
+            new_page_word_indices.setdefault(page_idx, []).append(idx)
+        
+        # Create a global diff to find moved content
+        old_tokens = [w.text for w, _ in old_words_with_page]
+        new_tokens = [w.text for w, _ in new_words_with_page]
+        global_matcher = SequenceMatcher(a=old_tokens, b=new_tokens)
+        
+        # Track which words were matched across different pages (moved content)
+        moved_old_word_indices: Dict[int, set] = {}  # old_page -> set of word indices that moved
+        moved_new_word_indices: Dict[int, set] = {}  # new_page -> set of word indices that moved from elsewhere
+        
+        for tag, i1, i2, j1, j2 in global_matcher.get_opcodes():
+            if tag == "equal" and (i2 - i1) >= 3:  # Only consider sequences of 3+ words to avoid false matches
+                # Check if these equal sequences are on different pages
+                old_page = old_words_with_page[i1][1]
+                new_page = new_words_with_page[j1][1]
+                
+                if old_page != new_page:
+                    # Content moved between pages - mark all words in this sequence
+                    for old_idx in range(i1, i2):
+                        moved_old_word_indices.setdefault(old_page, set()).add(old_idx)
+                    for new_idx in range(j1, j2):
+                        moved_new_word_indices.setdefault(new_page, set()).add(new_idx)
+        
+        # Now filter out moved content from deleted/added boxes
+        # We need to map word indices back to boxes
+        for page_index in range(max_pages):
+            if page_index >= len(pages):
+                continue
+                
+            page_diff = pages[page_index]
+            
+            # Get words for this page (use stored words from first pass)
+            old_page_words = stored_old_words.get(page_index, [])
+            new_page_words = stored_new_words.get(page_index, [])
+            
+            # Find which boxes correspond to moved words
+            moved_old_words = moved_old_word_indices.get(page_index, set())
+            moved_new_words = moved_new_word_indices.get(page_index, set())
+            
+            # Calculate global word start indices for this page
+            old_start_idx = sum(len(stored_old_words.get(i, [])) for i in range(page_index))
+            new_start_idx = sum(len(stored_new_words.get(i, [])) for i in range(page_index))
+            
+            # Filter removed boxes: exclude boxes that contain mostly moved words
+            filtered_removed = []
+            for removed_box in page_diff.removed_boxes:
+                # Check if any words in this box were marked as moved
+                # We approximate by checking if box overlaps with moved word positions
+                # This is heuristic but works well in practice
+                box_contains_moved = False
+                if old_page_words and moved_old_words:
+                    # Check if removed box likely contains moved words
+                    # Simple heuristic: if box center is near moved words, consider it moved
+                    box_center_x = (removed_box[0] + removed_box[2]) / 2
+                    box_center_y = (removed_box[1] + removed_box[3]) / 2
+                    
+                    # Count moved words near this box
+                    moved_count = 0
+                    total_count = 0
+                    for local_idx, word in enumerate(old_page_words):
+                        global_idx = old_start_idx + local_idx
+                        if global_idx in moved_old_words:
+                            word_center_x = (word.bbox[0] + word.bbox[2]) / 2
+                            word_center_y = (word.bbox[1] + word.bbox[3]) / 2
+                            # Check if word is within or near the box
+                            if (removed_box[0] <= word_center_x <= removed_box[2] and
+                                removed_box[1] <= word_center_y <= removed_box[3]):
+                                moved_count += 1
+                            total_count += 1
+                    
+                    # If >30% of words in box area are moved, consider the box moved
+                    if total_count > 0 and moved_count / total_count > 0.3:
+                        box_contains_moved = True
+                
+                if not box_contains_moved:
+                    filtered_removed.append(removed_box)
+            
+            # Filter added boxes similarly
+            filtered_added = []
+            for added_box in page_diff.added_boxes:
+                box_contains_moved = False
+                if new_page_words and moved_new_words:
+                    box_center_x = (added_box[0] + added_box[2]) / 2
+                    box_center_y = (added_box[1] + added_box[3]) / 2
+                    
+                    moved_count = 0
+                    total_count = 0
+                    for local_idx, word in enumerate(new_page_words):
+                        global_idx = new_start_idx + local_idx
+                        if global_idx in moved_new_words:
+                            word_center_x = (word.bbox[0] + word.bbox[2]) / 2
+                            word_center_y = (word.bbox[1] + word.bbox[3]) / 2
+                            if (added_box[0] <= word_center_x <= added_box[2] and
+                                added_box[1] <= word_center_y <= added_box[3]):
+                                moved_count += 1
+                            total_count += 1
+                    
+                    if total_count > 0 and moved_count / total_count > 0.3:
+                        box_contains_moved = True
+                
+                if not box_contains_moved:
+                    filtered_added.append(added_box)
+            
+            # Update the page diff with filtered boxes
+            page_diff.removed_boxes = filtered_removed
+            page_diff.added_boxes = filtered_added
+            
+            # Update status if boxes were filtered out
+            if (not filtered_removed and not filtered_added and 
+                page_diff.visual_boxes and 
+                page_diff.status == "changed"):
+                # If only visual changes remain, keep status as changed
+                pass
+            elif not filtered_removed and not filtered_added and not page_diff.visual_boxes:
+                page_diff.status = "unchanged"
 
     text_similarity = SequenceMatcher(
         a=normalize_text(all_old_words), b=normalize_text(all_new_words)
