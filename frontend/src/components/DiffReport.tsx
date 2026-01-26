@@ -314,22 +314,35 @@ export default function DiffReport({ report, onCompareAgain, oldFileName, newFil
       </div>
 
       {/* Download Buttons */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
-          gap: "16px",
-        }}
-      >
-        <ChangesReport 
-          report={report} 
-          oldFileName={oldFileName}
-          newFileName={newFileName}
-        />
-        {[
-          { url: report.downloads.annotated_old, label: "Download Original PDF", icon: "📥" },
-          { url: report.downloads.annotated_new, label: "Download Updated PDF", icon: "📥" },
-        ].map((download, i) => (
+      <div style={{ display: "grid", gap: "20px" }}>
+        {/* Summary Reports */}
+        <div>
+          <h3 style={{ margin: "0 0 12px 0", fontSize: "1.2rem", fontWeight: 700, color: "#212529" }}>
+            📋 Summary Reports
+          </h3>
+          <ChangesReport 
+            report={report} 
+            oldFileName={oldFileName}
+            newFileName={newFileName}
+          />
+        </div>
+
+        {/* Annotated PDFs */}
+        <div>
+          <h3 style={{ margin: "0 0 12px 0", fontSize: "1.2rem", fontWeight: 700, color: "#212529" }}>
+            📑 Annotated PDFs
+          </h3>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
+              gap: "16px",
+            }}
+          >
+            {[
+              { url: report.downloads.annotated_old, label: "Download Original PDF", icon: "📥" },
+              { url: report.downloads.annotated_new, label: "Download Updated PDF", icon: "📥" },
+            ].map((download, i) => (
           <a
             key={i}
             href={`${base}${download.url}`}
@@ -362,7 +375,9 @@ export default function DiffReport({ report, onCompareAgain, oldFileName, newFil
             <span style={{ fontSize: "1.3em" }}>{download.icon}</span>
             <span>{download.label}</span>
           </a>
-        ))}
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Page Summary */}

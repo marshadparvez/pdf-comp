@@ -1,4 +1,7 @@
 import type { CompareResponse } from "../api";
+import { useState } from "react";
+import jsPDF from "jspdf";
+import html2canvas from "html2canvas";
 
 type ChangesReportProps = {
   report: CompareResponse;
@@ -6,15 +9,19 @@ type ChangesReportProps = {
   newFileName: string;
 };
 
+type ReportFormat = "html" | "pdf";
+
 export default function ChangesReport({ report, oldFileName, newFileName }: ChangesReportProps) {
-  const generateHTMLReport = () => {
+  const [isGenerating, setIsGenerating] = useState(false);
+
+  const getReportHTML = () => {
     const totalAdded = report.pages.reduce((sum, p) => sum + p.added_boxes.length, 0);
     const totalRemoved = report.pages.reduce((sum, p) => sum + p.removed_boxes.length, 0);
     const totalVisual = report.pages.reduce((sum, p) => sum + p.visual_boxes.length, 0);
     const changedPages = report.pages.filter(p => p.status === "changed").length;
     const similarityPct = Math.round(report.similarity_score * 100);
 
-    const html = `<!DOCTYPE html>
+    return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
@@ -159,7 +166,10 @@ export default function ChangesReport({ report, oldFileName, newFileName }: Chan
   </div>
 </body>
 </html>`;
+  };
 
+  const generateHTMLReport = () => {
+    const html = getReportHTML();
     const blob = new Blob([html], { type: 'text/html' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -171,40 +181,160 @@ export default function ChangesReport({ report, oldFileName, newFileName }: Chan
     URL.revokeObjectURL(url);
   };
 
+  const generatePDFReport = async () => {
+    setIsGenerating(true);
+    
+    try {
+      // Create a temporary container
+      const container = document.createElement('div');
+      container.style.position = 'absolute';
+      container.style.left = '-9999px';
+      container.style.top = '0';
+      container.style.width = '210mm'; // A4 width
+      container.innerHTML = getReportHTML();
+      document.body.appendChild(container);
+
+      // Wait for any images or content to load
+      await new Promise(resolve => setTimeout(resolve, 100));
+
+      // Find the report container
+      const reportElement = container.querySelector('.container') as HTMLElement;
+      if (!reportElement) {
+        throw new Error('Report element not found');
+      }
+
+      // Generate canvas from HTML
+      const canvas = await html2canvas(reportElement, {
+        scale: 2,
+        useCORS: true,
+        logging: false,
+        backgroundColor: '#ffffff',
+      });
+
+      // Calculate PDF dimensions
+      const imgWidth = 210; // A4 width in mm
+      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      
+      // Create PDF
+      const pdf = new jsPDF({
+        orientation: imgHeight > imgWidth ? 'portrait' : 'portrait',
+        unit: 'mm',
+        format: 'a4',
+      });
+
+      // Add image to PDF
+      const imgData = canvas.toDataURL('image/png');
+      
+      // Handle multi-page PDFs if content is too long
+      let heightLeft = imgHeight;
+      let position = 0;
+      const pageHeight = 297; // A4 height in mm
+
+      pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+      heightLeft -= pageHeight;
+
+      while (heightLeft > 0) {
+        position = heightLeft - imgHeight;
+        pdf.addPage();
+        pdf.addImage(imgData, 'PNG', 0, position, imgWidth, imgHeight);
+        heightLeft -= pageHeight;
+      }
+
+      // Save PDF
+      pdf.save(`comparison-report-${new Date().getTime()}.pdf`);
+
+      // Clean up
+      document.body.removeChild(container);
+    } catch (error) {
+      console.error('Error generating PDF:', error);
+      alert('Failed to generate PDF. Please try downloading the HTML report instead.');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
   return (
-    <button
-      type="button"
-      onClick={generateHTMLReport}
-      style={{
-        padding: "14px 28px",
-        background: "white",
-        border: "2px solid #667eea",
-        borderRadius: "12px",
-        color: "#667eea",
-        fontWeight: 700,
-        cursor: "pointer",
-        transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
-        fontSize: "1rem",
-        boxShadow: "0 4px 12px rgba(102, 126, 234, 0.15)",
-        display: "flex",
-        alignItems: "center",
-        gap: "10px",
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.background = "linear-gradient(135deg, #667eea, #764ba2)";
-        e.currentTarget.style.color = "white";
-        e.currentTarget.style.transform = "translateY(-2px)";
-        e.currentTarget.style.boxShadow = "0 8px 20px rgba(102, 126, 234, 0.3)";
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.background = "white";
-        e.currentTarget.style.color = "#667eea";
-        e.currentTarget.style.transform = "translateY(0)";
-        e.currentTarget.style.boxShadow = "0 4px 12px rgba(102, 126, 234, 0.15)";
-      }}
-    >
-      <span style={{ fontSize: "1.2em" }}>📄</span>
-      <span>Download Summary Report</span>
-    </button>
+    <div style={{ display: "flex", gap: "12px", flexWrap: "wrap" }}>
+      <button
+        type="button"
+        onClick={generatePDFReport}
+        disabled={isGenerating}
+        style={{
+          padding: "14px 28px",
+          background: isGenerating ? "#adb5bd" : "white",
+          border: "2px solid #dc3545",
+          borderRadius: "12px",
+          color: isGenerating ? "white" : "#dc3545",
+          fontWeight: 700,
+          cursor: isGenerating ? "not-allowed" : "pointer",
+          transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+          fontSize: "1rem",
+          boxShadow: isGenerating ? "none" : "0 4px 12px rgba(220, 53, 69, 0.15)",
+          display: "flex",
+          alignItems: "center",
+          gap: "10px",
+          flex: 1,
+          minWidth: "200px",
+          justifyContent: "center",
+        }}
+        onMouseEnter={(e) => {
+          if (!isGenerating) {
+            e.currentTarget.style.background = "#dc3545";
+            e.currentTarget.style.color = "white";
+            e.currentTarget.style.transform = "translateY(-2px)";
+            e.currentTarget.style.boxShadow = "0 8px 20px rgba(220, 53, 69, 0.3)";
+          }
+        }}
+        onMouseLeave={(e) => {
+          if (!isGenerating) {
+            e.currentTarget.style.background = "white";
+            e.currentTarget.style.color = "#dc3545";
+            e.currentTarget.style.transform = "translateY(0)";
+            e.currentTarget.style.boxShadow = "0 4px 12px rgba(220, 53, 69, 0.15)";
+          }
+        }}
+      >
+        <span style={{ fontSize: "1.2em" }}>{isGenerating ? "⏳" : "📕"}</span>
+        <span>{isGenerating ? "Generating..." : "Download PDF Report"}</span>
+      </button>
+      
+      <button
+        type="button"
+        onClick={generateHTMLReport}
+        style={{
+          padding: "14px 28px",
+          background: "white",
+          border: "2px solid #667eea",
+          borderRadius: "12px",
+          color: "#667eea",
+          fontWeight: 700,
+          cursor: "pointer",
+          transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+          fontSize: "1rem",
+          boxShadow: "0 4px 12px rgba(102, 126, 234, 0.15)",
+          display: "flex",
+          alignItems: "center",
+          gap: "10px",
+          flex: 1,
+          minWidth: "200px",
+          justifyContent: "center",
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.background = "linear-gradient(135deg, #667eea, #764ba2)";
+          e.currentTarget.style.color = "white";
+          e.currentTarget.style.transform = "translateY(-2px)";
+          e.currentTarget.style.boxShadow = "0 8px 20px rgba(102, 126, 234, 0.3)";
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.background = "white";
+          e.currentTarget.style.color = "#667eea";
+          e.currentTarget.style.transform = "translateY(0)";
+          e.currentTarget.style.boxShadow = "0 4px 12px rgba(102, 126, 234, 0.15)";
+        }}
+      >
+        <span style={{ fontSize: "1.2em" }}>📄</span>
+        <span>Download HTML Report</span>
+      </button>
+    </div>
   );
 }
