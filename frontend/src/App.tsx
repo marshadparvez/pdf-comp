@@ -7,11 +7,15 @@ import { comparePdfs, type CompareResponse } from "./api";
 export default function App() {
   const [report, setReport] = useState<CompareResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingComplete, setLoadingComplete] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showContent, setShowContent] = useState(true);
+  const [fileNames, setFileNames] = useState<{ old: string; new: string }>({ old: "", new: "" });
 
   const handleSubmit = async (oldFile: File, newFile: File, mode: "speed" | "accuracy") => {
     setShowContent(false);
+    setLoadingComplete(false);
+    setFileNames({ old: oldFile.name, new: newFile.name });
     setTimeout(() => {
       setIsLoading(true);
       setError(null);
@@ -21,11 +25,16 @@ export default function App() {
 
     try {
       const result = await comparePdfs(oldFile, newFile, mode);
-      setReport(result);
+      setLoadingComplete(true);
+      // Small delay to show 100% completion
+      setTimeout(() => {
+        setReport(result);
+        setIsLoading(false);
+      }, 800);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
-    } finally {
       setIsLoading(false);
+      setLoadingComplete(false);
     }
   };
 
@@ -203,7 +212,10 @@ export default function App() {
               animation: showContent ? "fadeInUp 0.5s ease-out" : "none",
             }}
           >
-            <LoadingProgress message="Analyzing PDFs and computing differences..." />
+            <LoadingProgress 
+              message="Analyzing PDFs and computing differences..." 
+              isComplete={loadingComplete}
+            />
           </div>
         )}
 
@@ -221,7 +233,12 @@ export default function App() {
               transition: "all 0.3s ease-out",
             }}
           >
-            <DiffReport report={report} onCompareAgain={handleCompareAgain} />
+            <DiffReport 
+              report={report} 
+              onCompareAgain={handleCompareAgain}
+              oldFileName={fileNames.old}
+              newFileName={fileNames.new}
+            />
           </div>
         )}
       </main>

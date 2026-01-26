@@ -1,13 +1,16 @@
 import type { CompareResponse } from "../api";
 import { API_BASE } from "../api";
 import { useState } from "react";
+import ChangesReport from "./ChangesReport";
 
 type DiffReportProps = {
   report: CompareResponse;
   onCompareAgain?: () => void;
+  oldFileName: string;
+  newFileName: string;
 };
 
-export default function DiffReport({ report, onCompareAgain }: DiffReportProps) {
+export default function DiffReport({ report, onCompareAgain, oldFileName, newFileName }: DiffReportProps) {
   const base = API_BASE.replace(/\/$/, "");
   const similarityPct = Math.round(report.similarity_score * 100);
   const [activeTab, setActiveTab] = useState<"summary" | "details">("summary");
@@ -244,6 +247,72 @@ export default function DiffReport({ report, onCompareAgain }: DiffReportProps) 
         ))}
       </div>
 
+      {/* How to Use Guide */}
+      <div
+        style={{
+          padding: "24px",
+          background: "linear-gradient(135deg, rgba(102, 126, 234, 0.05), rgba(118, 75, 162, 0.05))",
+          borderRadius: "16px",
+          border: "2px solid rgba(102, 126, 234, 0.15)",
+        }}
+      >
+        <h3 style={{ margin: "0 0 16px 0", fontSize: "1.3rem", fontWeight: 700, color: "#212529", display: "flex", alignItems: "center", gap: "10px" }}>
+          <span style={{ fontSize: "1.5em" }}>💡</span>
+          How to Read the Annotated PDFs
+        </h3>
+        <div style={{ display: "grid", gap: "12px", fontSize: "0.95rem", color: "#495057" }}>
+          <div style={{ display: "flex", gap: "12px", alignItems: "flex-start" }}>
+            <div style={{ 
+              width: "24px", 
+              height: "24px", 
+              background: "#dc3545", 
+              borderRadius: "6px", 
+              flexShrink: 0,
+              boxShadow: "0 2px 6px rgba(220, 53, 69, 0.3)",
+            }} />
+            <div>
+              <strong style={{ color: "#dc3545" }}>Red boxes</strong> highlight content that was <strong>removed</strong> from the original PDF
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: "12px", alignItems: "flex-start" }}>
+            <div style={{ 
+              width: "24px", 
+              height: "24px", 
+              background: "#28a745", 
+              borderRadius: "6px", 
+              flexShrink: 0,
+              boxShadow: "0 2px 6px rgba(40, 167, 69, 0.3)",
+            }} />
+            <div>
+              <strong style={{ color: "#28a745" }}>Green boxes</strong> show content that was <strong>added</strong> in the updated PDF
+            </div>
+          </div>
+          <div style={{ display: "flex", gap: "12px", alignItems: "flex-start" }}>
+            <div style={{ 
+              width: "24px", 
+              height: "24px", 
+              background: "#ffc107", 
+              borderRadius: "6px", 
+              flexShrink: 0,
+              boxShadow: "0 2px 6px rgba(255, 193, 7, 0.3)",
+            }} />
+            <div>
+              <strong style={{ color: "#ffc107" }}>Yellow boxes</strong> indicate <strong>visual or formatting changes</strong> (layout shifts, styling, etc.)
+            </div>
+          </div>
+        </div>
+        <div style={{ 
+          marginTop: "16px", 
+          padding: "12px 16px", 
+          background: "rgba(102, 126, 234, 0.08)", 
+          borderRadius: "8px",
+          fontSize: "0.9rem",
+          color: "#495057",
+        }}>
+          <strong>💡 Pro Tip:</strong> Open both PDFs side-by-side on your computer for easy comparison. Use the page numbers from the summary below to quickly navigate to changed pages.
+        </div>
+      </div>
+
       {/* Download Buttons */}
       <div
         style={{
@@ -252,9 +321,14 @@ export default function DiffReport({ report, onCompareAgain }: DiffReportProps) 
           gap: "16px",
         }}
       >
+        <ChangesReport 
+          report={report} 
+          oldFileName={oldFileName}
+          newFileName={newFileName}
+        />
         {[
-          { url: report.downloads.annotated_old, label: "Download Original", icon: "📥" },
-          { url: report.downloads.annotated_new, label: "Download Updated", icon: "📥" },
+          { url: report.downloads.annotated_old, label: "Download Original PDF", icon: "📥" },
+          { url: report.downloads.annotated_new, label: "Download Updated PDF", icon: "📥" },
         ].map((download, i) => (
           <a
             key={i}

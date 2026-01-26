@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 
 type LoadingProgressProps = {
   message?: string;
+  isComplete?: boolean;
 };
 
 const STAGES = [
@@ -13,7 +14,7 @@ const STAGES = [
   { name: "Finalizing results", duration: 1000, icon: "🎯" },
 ];
 
-export default function LoadingProgress({ message = "Comparing PDFs..." }: LoadingProgressProps) {
+export default function LoadingProgress({ message = "Comparing PDFs...", isComplete = false }: LoadingProgressProps) {
   const [progress, setProgress] = useState(0);
   const [currentStage, setCurrentStage] = useState(0);
   const [elapsedTime, setElapsedTime] = useState(0);
@@ -22,6 +23,13 @@ export default function LoadingProgress({ message = "Comparing PDFs..." }: Loadi
   );
 
   useEffect(() => {
+    // If complete, jump to 100%
+    if (isComplete) {
+      setProgress(100);
+      setCurrentStage(STAGES.length - 1);
+      return;
+    }
+
     const startTime = Date.now();
     let currentProgress = 0;
     let stageIndex = 0;
@@ -55,19 +63,26 @@ export default function LoadingProgress({ message = "Comparing PDFs..." }: Loadi
           stageIndex++;
           stageStartTime = now;
           setCurrentStage(stageIndex);
+        } else if (stageProgress >= 1 && stageIndex === STAGES.length - 1) {
+          // If we're on the last stage and time is up, show "waiting for server"
+          setCurrentStage(STAGES.length);
         }
       }
     }, 50);
 
     return () => clearInterval(interval);
-  }, [estimatedTotal]);
+  }, [estimatedTotal, isComplete]);
 
   const formatTime = (ms: number) => {
     const seconds = Math.floor(ms / 1000);
     return `${seconds}s`;
   };
 
-  const estimatedRemaining = Math.max(0, estimatedTotal - elapsedTime);
+  const estimatedRemaining = isComplete ? 0 : Math.max(0, estimatedTotal - elapsedTime);
+  const isWaitingForServer = currentStage >= STAGES.length;
+  const displayStage = isWaitingForServer 
+    ? { name: "Finalizing on server...", icon: "⏳" }
+    : STAGES[currentStage];
 
   return (
     <div
@@ -137,14 +152,14 @@ export default function LoadingProgress({ message = "Comparing PDFs..." }: Loadi
             gap: "4px",
           }}
         >
-          <div style={{ fontSize: "32px", animation: "pulse 2s ease-in-out infinite" }}>
-            {STAGES[currentStage]?.icon || "📊"}
+          <div style={{ fontSize: "32px", animation: isComplete ? "scale 0.5s ease-out" : "pulse 2s ease-in-out infinite" }}>
+            {isComplete ? "✅" : displayStage?.icon || "📊"}
           </div>
           <div
             style={{
               fontSize: "1.5rem",
               fontWeight: 800,
-              color: "#667eea",
+              color: isComplete ? "#28a745" : "#667eea",
               lineHeight: 1,
             }}
           >
@@ -160,11 +175,11 @@ export default function LoadingProgress({ message = "Comparing PDFs..." }: Loadi
             margin: "0 0 12px 0",
             fontSize: "1.5rem",
             fontWeight: 700,
-            color: "#212529",
+            color: isComplete ? "#28a745" : "#212529",
             animation: "fadeIn 0.5s ease-out",
           }}
         >
-          {STAGES[currentStage]?.name || "Processing..."}
+          {isComplete ? "Complete! ✨" : displayStage?.name || "Processing..."}
         </h3>
         <p
           style={{
@@ -175,7 +190,7 @@ export default function LoadingProgress({ message = "Comparing PDFs..." }: Loadi
             animation: "fadeIn 0.5s ease-out 0.2s backwards",
           }}
         >
-          {message}
+          {isComplete ? "Preparing your results..." : message}
         </p>
       </div>
 
@@ -261,10 +276,10 @@ export default function LoadingProgress({ message = "Comparing PDFs..." }: Loadi
           }}
         >
           <div style={{ fontSize: "0.75rem", color: "#6c757d", marginBottom: "4px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.5px" }}>
-            Remaining
+            {isWaitingForServer ? "Status" : "Remaining"}
           </div>
           <div style={{ fontSize: "1.2rem", fontWeight: 700, color: "#764ba2" }}>
-            ~{formatTime(estimatedRemaining)}
+            {isWaitingForServer ? "Processing..." : `~${formatTime(estimatedRemaining)}`}
           </div>
         </div>
       </div>
@@ -346,6 +361,18 @@ export default function LoadingProgress({ message = "Comparing PDFs..." }: Loadi
             to {
               opacity: 1;
               transform: translateY(0);
+            }
+          }
+
+          @keyframes scale {
+            0% {
+              transform: scale(1);
+            }
+            50% {
+              transform: scale(1.2);
+            }
+            100% {
+              transform: scale(1);
             }
           }
 
