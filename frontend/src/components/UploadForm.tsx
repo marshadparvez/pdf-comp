@@ -10,10 +10,17 @@ const MODE_HELP: Record<"speed" | "accuracy", string> = {
   accuracy: "Deeper layout-aware comparison. Slower but more reliable for complex or mixed PDFs.",
 };
 
+const formatFileSize = (bytes: number): string => {
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+};
+
 export default function UploadForm({ onSubmit, isLoading }: UploadFormProps) {
   const [oldFile, setOldFile] = useState<File | null>(null);
   const [newFile, setNewFile] = useState<File | null>(null);
   const [mode, setMode] = useState<"speed" | "accuracy">("speed");
+  const [dragOver, setDragOver] = useState<"old" | "new" | null>(null);
 
   const handleSubmit = (event: React.FormEvent) => {
     event.preventDefault();
@@ -21,174 +28,335 @@ export default function UploadForm({ onSubmit, isLoading }: UploadFormProps) {
     onSubmit(oldFile, newFile, mode);
   };
 
-  return (
-    <form onSubmit={handleSubmit} style={{ display: "grid", gap: "24px" }}>
-      <label
-        style={{
-          display: "grid",
-          gap: "8px",
-        }}
-      >
-        <span style={{ fontWeight: 600, color: "#212529", fontSize: "0.95em" }}>Original PDF</span>
-        <div
-          style={{
-            position: "relative",
-            border: "2px dashed #dee2e6",
-            borderRadius: "8px",
-            padding: "20px",
-            textAlign: "center",
-            background: "#f8f9fa",
-            transition: "all 0.2s",
-            cursor: "pointer",
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = "#667eea";
-            e.currentTarget.style.background = "#f0f4ff";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = "#dee2e6";
-            e.currentTarget.style.background = "#f8f9fa";
-          }}
-        >
-          <input
-            type="file"
-            accept="application/pdf"
-            onChange={(e) => setOldFile(e.target.files?.[0] ?? null)}
-            style={{
-              position: "absolute",
-              inset: 0,
-              opacity: 0,
-              cursor: "pointer",
-            }}
-            disabled={isLoading}
-          />
-          <div>
-            <span style={{ fontSize: "2em", display: "block", marginBottom: "8px" }}>📄</span>
-            <span style={{ color: "#6c757d", fontSize: "0.9em" }}>
-              {oldFile ? oldFile.name : "Click to select or drag PDF here"}
-            </span>
-          </div>
-        </div>
-      </label>
+  const handleDragOver = (e: React.DragEvent, type: "old" | "new") => {
+    e.preventDefault();
+    setDragOver(type);
+  };
 
-      <label
-        style={{
-          display: "grid",
-          gap: "8px",
-        }}
-      >
-        <span style={{ fontWeight: 600, color: "#212529", fontSize: "0.95em" }}>Updated PDF</span>
-        <div
-          style={{
-            position: "relative",
-            border: "2px dashed #dee2e6",
-            borderRadius: "8px",
-            padding: "20px",
-            textAlign: "center",
-            background: "#f8f9fa",
-            transition: "all 0.2s",
-            cursor: "pointer",
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.borderColor = "#667eea";
-            e.currentTarget.style.background = "#f0f4ff";
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.borderColor = "#dee2e6";
-            e.currentTarget.style.background = "#f8f9fa";
-          }}
-        >
-          <input
-            type="file"
-            accept="application/pdf"
-            onChange={(e) => setNewFile(e.target.files?.[0] ?? null)}
-            style={{
-              position: "absolute",
-              inset: 0,
-              opacity: 0,
-              cursor: "pointer",
-            }}
-            disabled={isLoading}
-          />
-          <div>
-            <span style={{ fontSize: "2em", display: "block", marginBottom: "8px" }}>📄</span>
-            <span style={{ color: "#6c757d", fontSize: "0.9em" }}>
-              {newFile ? newFile.name : "Click to select or drag PDF here"}
-            </span>
-          </div>
-        </div>
-      </label>
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(null);
+  };
 
-      <div style={{ display: "grid", gap: "8px" }}>
-        <label htmlFor="mode" style={{ fontWeight: 600, color: "#212529", fontSize: "0.95em" }}>
-          Comparison mode
+  const handleDrop = (e: React.DragEvent, type: "old" | "new") => {
+    e.preventDefault();
+    setDragOver(null);
+    const file = e.dataTransfer.files[0];
+    if (file && file.type === "application/pdf") {
+      if (type === "old") setOldFile(file);
+      else setNewFile(file);
+    }
+  };
+
+  const FileUploadBox = ({ 
+    file, 
+    onChange, 
+    type, 
+    label 
+  }: { 
+    file: File | null; 
+    onChange: (file: File | null) => void; 
+    type: "old" | "new"; 
+    label: string;
+  }) => {
+    const isDragActive = dragOver === type;
+    const hasFile = !!file;
+
+    return (
+      <div style={{ display: "grid", gap: "12px" }}>
+        <label style={{ fontWeight: 700, color: "#212529", fontSize: "1rem", display: "flex", alignItems: "center", gap: "8px" }}>
+          <span style={{ 
+            width: "8px", 
+            height: "8px", 
+            borderRadius: "50%", 
+            background: hasFile ? "#28a745" : "#dee2e6",
+            transition: "all 0.3s",
+            boxShadow: hasFile ? "0 0 8px rgba(40, 167, 69, 0.4)" : "none",
+          }} />
+          {label}
         </label>
-        <select
-          id="mode"
-          value={mode}
-          onChange={(e) => setMode(e.target.value as "speed" | "accuracy")}
-          disabled={isLoading}
+        <div
           style={{
-            padding: "12px 16px",
-            border: "1px solid #dee2e6",
-            borderRadius: "8px",
-            fontSize: "1em",
-            background: "white",
+            position: "relative",
+            border: `3px dashed ${isDragActive ? "#667eea" : hasFile ? "#28a745" : "#dee2e6"}`,
+            borderRadius: "16px",
+            padding: hasFile ? "24px" : "32px",
+            textAlign: "center",
+            background: isDragActive ? "#f0f4ff" : hasFile ? "#f0fdf4" : "#fafbfc",
+            transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
             cursor: "pointer",
-            transition: "border-color 0.2s",
+            transform: isDragActive ? "scale(1.02)" : "scale(1)",
+            boxShadow: isDragActive 
+              ? "0 8px 24px rgba(102, 126, 234, 0.2)" 
+              : hasFile 
+                ? "0 4px 12px rgba(40, 167, 69, 0.1)"
+                : "0 2px 8px rgba(0, 0, 0, 0.05)",
           }}
-          onFocus={(e) => (e.target.style.borderColor = "#667eea")}
-          onBlur={(e) => (e.target.style.borderColor = "#dee2e6")}
+          onDragOver={(e) => handleDragOver(e, type)}
+          onDragLeave={handleDragLeave}
+          onDrop={(e) => handleDrop(e, type)}
         >
-          <option value="speed">⚡ Speed — fast for large PDFs</option>
-          <option value="accuracy">🎯 Accuracy — best for mixed/scanned</option>
-        </select>
-        <p
-          style={{
-            fontSize: "0.85em",
-            color: "#6c757d",
-            margin: 0,
-            padding: "8px 12px",
-            background: "#f8f9fa",
-            borderRadius: "6px",
-          }}
-        >
-          {MODE_HELP[mode]}
-        </p>
+          <input
+            type="file"
+            accept="application/pdf"
+            onChange={(e) => onChange(e.target.files?.[0] ?? null)}
+            style={{
+              position: "absolute",
+              inset: 0,
+              opacity: 0,
+              cursor: "pointer",
+            }}
+            disabled={isLoading}
+          />
+          <div>
+            <div
+              style={{
+                fontSize: "3em",
+                marginBottom: "12px",
+                animation: hasFile ? "none" : "float 3s ease-in-out infinite",
+                display: "inline-block",
+              }}
+            >
+              {hasFile ? "✅" : "📄"}
+            </div>
+            {hasFile ? (
+              <div style={{ animation: "fadeInUp 0.3s ease-out" }}>
+                <div style={{ 
+                  fontWeight: 600, 
+                  color: "#155724", 
+                  fontSize: "1.05rem", 
+                  marginBottom: "8px",
+                  wordBreak: "break-word",
+                }}>
+                  {file.name}
+                </div>
+                <div style={{ 
+                  display: "inline-flex", 
+                  alignItems: "center", 
+                  gap: "12px",
+                  padding: "8px 16px",
+                  background: "rgba(40, 167, 69, 0.1)",
+                  borderRadius: "8px",
+                  fontSize: "0.9rem",
+                  color: "#155724",
+                }}>
+                  <span>📏 {formatFileSize(file.size)}</span>
+                  <span>•</span>
+                  <span>📅 {new Date(file.lastModified).toLocaleDateString()}</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onChange(null);
+                  }}
+                  style={{
+                    marginTop: "12px",
+                    padding: "6px 16px",
+                    background: "transparent",
+                    border: "2px solid #dc3545",
+                    borderRadius: "8px",
+                    color: "#dc3545",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                    fontSize: "0.9rem",
+                    transition: "all 0.2s",
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = "#dc3545";
+                    e.currentTarget.style.color = "white";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = "transparent";
+                    e.currentTarget.style.color = "#dc3545";
+                  }}
+                >
+                  Remove
+                </button>
+              </div>
+            ) : (
+              <div>
+                <div style={{ color: "#495057", fontSize: "1.05rem", fontWeight: 600, marginBottom: "8px" }}>
+                  {isDragActive ? "Drop your PDF here!" : "Drag & drop your PDF here"}
+                </div>
+                <div style={{ color: "#6c757d", fontSize: "0.9rem" }}>
+                  or click to browse
+                </div>
+                <div style={{ 
+                  marginTop: "12px", 
+                  fontSize: "0.85rem", 
+                  color: "#adb5bd",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "8px",
+                }}>
+                  <span>Max 100 MB</span>
+                  <span>•</span>
+                  <span>PDF only</span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <form onSubmit={handleSubmit} style={{ display: "grid", gap: "32px" }}>
+      <div style={{ display: "grid", gap: "24px", gridTemplateColumns: "1fr 1fr" }}>
+        <FileUploadBox file={oldFile} onChange={setOldFile} type="old" label="Original PDF" />
+        <FileUploadBox file={newFile} onChange={setNewFile} type="new" label="Updated PDF" />
+      </div>
+
+      <div style={{ display: "grid", gap: "16px" }}>
+        <label htmlFor="mode" style={{ fontWeight: 700, color: "#212529", fontSize: "1rem" }}>
+          ⚙️ Comparison Mode
+        </label>
+        
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+          {(["speed", "accuracy"] as const).map((m) => (
+            <div
+              key={m}
+              onClick={() => setMode(m)}
+              style={{
+                padding: "20px",
+                border: `2px solid ${mode === m ? "#667eea" : "#e9ecef"}`,
+                borderRadius: "12px",
+                background: mode === m ? "linear-gradient(135deg, rgba(102, 126, 234, 0.05), rgba(118, 75, 162, 0.05))" : "white",
+                cursor: "pointer",
+                transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+                transform: mode === m ? "scale(1.02)" : "scale(1)",
+                boxShadow: mode === m ? "0 8px 24px rgba(102, 126, 234, 0.15)" : "0 2px 8px rgba(0, 0, 0, 0.05)",
+                position: "relative",
+                overflow: "hidden",
+              }}
+              onMouseEnter={(e) => {
+                if (mode !== m) {
+                  e.currentTarget.style.borderColor = "#667eea";
+                  e.currentTarget.style.transform = "scale(1.02)";
+                }
+              }}
+              onMouseLeave={(e) => {
+                if (mode !== m) {
+                  e.currentTarget.style.borderColor = "#e9ecef";
+                  e.currentTarget.style.transform = "scale(1)";
+                }
+              }}
+            >
+              {mode === m && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "8px",
+                    right: "8px",
+                    width: "24px",
+                    height: "24px",
+                    background: "linear-gradient(135deg, #667eea, #764ba2)",
+                    borderRadius: "50%",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    color: "white",
+                    fontSize: "14px",
+                    fontWeight: "bold",
+                    boxShadow: "0 2px 8px rgba(102, 126, 234, 0.4)",
+                  }}
+                >
+                  ✓
+                </div>
+              )}
+              <div style={{ fontSize: "32px", marginBottom: "8px" }}>
+                {m === "speed" ? "⚡" : "🎯"}
+              </div>
+              <div style={{ fontWeight: 700, color: "#212529", fontSize: "1.1rem", marginBottom: "4px" }}>
+                {m === "speed" ? "Speed" : "Accuracy"}
+              </div>
+              <div style={{ fontSize: "0.85rem", color: "#6c757d", lineHeight: "1.5" }}>
+                {MODE_HELP[m]}
+              </div>
+            </div>
+          ))}
+        </div>
       </div>
 
       <button
         type="submit"
         disabled={!oldFile || !newFile || isLoading}
         style={{
-          padding: "14px 24px",
-          fontSize: "1.05em",
-          fontWeight: 600,
+          padding: "18px 32px",
+          fontSize: "1.1rem",
+          fontWeight: 700,
           color: "white",
-          background: isLoading
+          background: (!oldFile || !newFile || isLoading)
             ? "#adb5bd"
             : "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
           border: "none",
-          borderRadius: "8px",
-          cursor: isLoading ? "not-allowed" : "pointer",
-          transition: "all 0.2s",
-          boxShadow: isLoading ? "none" : "0 4px 12px rgba(102, 126, 234, 0.4)",
+          borderRadius: "12px",
+          cursor: (!oldFile || !newFile || isLoading) ? "not-allowed" : "pointer",
+          transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+          boxShadow: (!oldFile || !newFile || isLoading) 
+            ? "none" 
+            : "0 8px 24px rgba(102, 126, 234, 0.4)",
+          position: "relative",
+          overflow: "hidden",
         }}
         onMouseEnter={(e) => {
-          if (!isLoading) {
-            e.currentTarget.style.transform = "translateY(-2px)";
-            e.currentTarget.style.boxShadow = "0 6px 16px rgba(102, 126, 234, 0.5)";
+          if (oldFile && newFile && !isLoading) {
+            e.currentTarget.style.transform = "translateY(-3px) scale(1.02)";
+            e.currentTarget.style.boxShadow = "0 12px 32px rgba(102, 126, 234, 0.5)";
           }
         }}
         onMouseLeave={(e) => {
-          if (!isLoading) {
-            e.currentTarget.style.transform = "translateY(0)";
-            e.currentTarget.style.boxShadow = "0 4px 12px rgba(102, 126, 234, 0.4)";
+          if (oldFile && newFile && !isLoading) {
+            e.currentTarget.style.transform = "translateY(0) scale(1)";
+            e.currentTarget.style.boxShadow = "0 8px 24px rgba(102, 126, 234, 0.4)";
           }
         }}
       >
-        {isLoading ? "⏳ Comparing…" : "🚀 Compare PDFs"}
+        <span style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "12px" }}>
+          <span style={{ fontSize: "1.3em" }}>
+            {isLoading ? "⏳" : "🚀"}
+          </span>
+          <span>
+            {isLoading ? "Comparing…" : "Start Comparison"}
+          </span>
+        </span>
       </button>
+
+      <style>
+        {`
+          @keyframes float {
+            0%, 100% {
+              transform: translateY(0);
+            }
+            50% {
+              transform: translateY(-10px);
+            }
+          }
+
+          @keyframes fadeInUp {
+            from {
+              opacity: 0;
+              transform: translateY(10px);
+            }
+            to {
+              opacity: 1;
+              transform: translateY(0);
+            }
+          }
+
+          @media (max-width: 768px) {
+            form > div:first-child {
+              grid-template-columns: 1fr !important;
+            }
+            form > div:nth-child(2) > div {
+              grid-template-columns: 1fr !important;
+            }
+          }
+        `}
+      </style>
     </form>
   );
 }
