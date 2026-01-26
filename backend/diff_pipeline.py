@@ -107,6 +107,15 @@ def _extract_bbox_from_metadata(metadata: object) -> Optional[Tuple[float, float
 def _extract_unstructured_words(pdf_path: Path) -> Dict[int, List[WordBox]]:
     if partition_pdf is None:
         return {}
+    
+    # Open PDF to get page dimensions for coordinate conversion
+    doc = fitz.open(pdf_path)
+    page_dims = {}
+    for i in range(doc.page_count):
+        page = doc.load_page(i)
+        page_dims[i] = (page.rect.width, page.rect.height)
+    doc.close()
+    
     elements = partition_pdf(
         filename=str(pdf_path),
         infer_table_structure=True,
@@ -125,8 +134,34 @@ def _extract_unstructured_words(pdf_path: Path) -> Dict[int, List[WordBox]]:
         if bbox is None:
             continue
         page_index = int(page_number) - 1
-        for word in text.split():
-            words_by_page.setdefault(page_index, []).append(WordBox(text=word, bbox=bbox))
+        
+        # Unstructured may return bboxes in image coordinates (pixels) or PDF coordinates
+        # Try to detect and convert if needed. Unstructured typically uses image coordinates
+        # with a default DPI of 200, so we need to scale down
+        # However, coordinates might already be in PDF space, so we check the scale
+        page_width, page_height = page_dims.get(page_index, (612, 792))  # Default letter size
+        
+        # If bbox coordinates are much larger than page dimensions, they're likely in image coords
+        # Typical PDF page is ~612x792 points, image at 200 DPI for letter is ~1700x2200 pixels
+        if bbox[2] > page_width * 2 or bbox[3] > page_height * 2:
+            # Likely image coordinates, convert to PDF coordinates
+            # Assume image was rendered at 200 DPI (common for hi_res strategy)
+            # PDF points = pixels / (DPI / 72)
+            scale_factor = 200.0 / 72.0
+            bbox = (bbox[0] / scale_factor, bbox[1] / scale_factor, 
+                   bbox[2] / scale_factor, bbox[3] / scale_factor)
+        
+        # Split text into words and create individual word boxes
+        # For now, use the element's bbox for each word (not ideal but better than nothing)
+        words = text.split()
+        if words:
+            # Distribute words across the bbox width
+            word_width = (bbox[2] - bbox[0]) / len(words) if len(words) > 0 else (bbox[2] - bbox[0])
+            for i, word in enumerate(words):
+                word_x0 = bbox[0] + (i * word_width)
+                word_x1 = bbox[0] + ((i + 1) * word_width)
+                word_bbox = (word_x0, bbox[1], word_x1, bbox[3])
+                words_by_page.setdefault(page_index, []).append(WordBox(text=word, bbox=word_bbox))
     return words_by_page
 
 

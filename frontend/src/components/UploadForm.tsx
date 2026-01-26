@@ -78,11 +78,11 @@ export default function UploadForm({ onSubmit, isLoading }: UploadFormProps) {
         <div
           style={{
             position: "relative",
-            border: `3px dashed ${isDragActive ? "#667eea" : hasFile ? "#28a745" : "#dee2e6"}`,
-            borderRadius: "16px",
+            border: `2px dashed ${isDragActive ? "#3b82f6" : hasFile ? "#10b981" : "#d1d5db"}`,
+            borderRadius: "8px",
             padding: hasFile ? "24px" : "32px",
             textAlign: "center",
-            background: isDragActive ? "#f0f4ff" : hasFile ? "#f0fdf4" : "#fafbfc",
+            background: isDragActive ? "#eff6ff" : hasFile ? "#f0fdf4" : "#f9fafb",
             transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
             cursor: "pointer",
             transform: isDragActive ? "scale(1.02)" : "scale(1)",
@@ -222,26 +222,25 @@ export default function UploadForm({ onSubmit, isLoading }: UploadFormProps) {
               onClick={() => setMode(m)}
               style={{
                 padding: "20px",
-                border: `2px solid ${mode === m ? "#667eea" : "#e9ecef"}`,
-                borderRadius: "12px",
-                background: mode === m ? "linear-gradient(135deg, rgba(102, 126, 234, 0.05), rgba(118, 75, 162, 0.05))" : "white",
+                border: `2px solid ${mode === m ? "#3b82f6" : "#e5e7eb"}`,
+                borderRadius: "8px",
+                background: mode === m ? "#eff6ff" : "white",
                 cursor: "pointer",
-                transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
-                transform: mode === m ? "scale(1.02)" : "scale(1)",
-                boxShadow: mode === m ? "0 8px 24px rgba(102, 126, 234, 0.15)" : "0 2px 8px rgba(0, 0, 0, 0.05)",
+                transition: "all 0.2s",
+                boxShadow: mode === m ? "0 0 0 3px rgba(59, 130, 246, 0.1)" : "none",
                 position: "relative",
                 overflow: "hidden",
               }}
               onMouseEnter={(e) => {
                 if (mode !== m) {
-                  e.currentTarget.style.borderColor = "#667eea";
-                  e.currentTarget.style.transform = "scale(1.02)";
+                  e.currentTarget.style.borderColor = "#3b82f6";
+                  e.currentTarget.style.background = "#f9fafb";
                 }
               }}
               onMouseLeave={(e) => {
                 if (mode !== m) {
-                  e.currentTarget.style.borderColor = "#e9ecef";
-                  e.currentTarget.style.transform = "scale(1)";
+                  e.currentTarget.style.borderColor = "#e5e7eb";
+                  e.currentTarget.style.background = "white";
                 }
               }}
             >
@@ -253,7 +252,7 @@ export default function UploadForm({ onSubmit, isLoading }: UploadFormProps) {
                     right: "8px",
                     width: "24px",
                     height: "24px",
-                    background: "linear-gradient(135deg, #667eea, #764ba2)",
+                    background: "#3b82f6",
                     borderRadius: "50%",
                     display: "flex",
                     alignItems: "center",
@@ -261,7 +260,6 @@ export default function UploadForm({ onSubmit, isLoading }: UploadFormProps) {
                     color: "white",
                     fontSize: "14px",
                     fontWeight: "bold",
-                    boxShadow: "0 2px 8px rgba(102, 126, 234, 0.4)",
                   }}
                 >
                   ✓
@@ -290,28 +288,28 @@ export default function UploadForm({ onSubmit, isLoading }: UploadFormProps) {
           fontWeight: 700,
           color: "white",
           background: (!oldFile || !newFile || isLoading)
-            ? "#adb5bd"
-            : "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
+            ? "#9ca3af"
+            : "#3b82f6",
           border: "none",
-          borderRadius: "12px",
+          borderRadius: "8px",
           cursor: (!oldFile || !newFile || isLoading) ? "not-allowed" : "pointer",
-          transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
+          transition: "all 0.2s",
           boxShadow: (!oldFile || !newFile || isLoading) 
             ? "none" 
-            : "0 8px 24px rgba(102, 126, 234, 0.4)",
+            : "0 1px 3px rgba(0, 0, 0, 0.1)",
           position: "relative",
           overflow: "hidden",
         }}
         onMouseEnter={(e) => {
           if (oldFile && newFile && !isLoading) {
-            e.currentTarget.style.transform = "translateY(-3px) scale(1.02)";
-            e.currentTarget.style.boxShadow = "0 12px 32px rgba(102, 126, 234, 0.5)";
+            e.currentTarget.style.background = "#2563eb";
+            e.currentTarget.style.boxShadow = "0 4px 12px rgba(59, 130, 246, 0.3)";
           }
         }}
         onMouseLeave={(e) => {
           if (oldFile && newFile && !isLoading) {
-            e.currentTarget.style.transform = "translateY(0) scale(1)";
-            e.currentTarget.style.boxShadow = "0 8px 24px rgba(102, 126, 234, 0.4)";
+            e.currentTarget.style.background = "#3b82f6";
+            e.currentTarget.style.boxShadow = "0 1px 3px rgba(0, 0, 0, 0.1)";
           }
         }}
       >

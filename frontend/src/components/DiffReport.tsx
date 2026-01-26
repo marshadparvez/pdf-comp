@@ -1,6 +1,6 @@
 import type { CompareResponse } from "../api";
 import { API_BASE } from "../api";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import ChangesReport from "./ChangesReport";
 
 type DiffReportProps = {
@@ -13,7 +13,9 @@ type DiffReportProps = {
 export default function DiffReport({ report, onCompareAgain, oldFileName, newFileName }: DiffReportProps) {
   const base = API_BASE.replace(/\/$/, "");
   const similarityPct = Math.round(report.similarity_score * 100);
-  const [activeTab, setActiveTab] = useState<"summary" | "details">("summary");
+  const [selectedPage, setSelectedPage] = useState<number | null>(null);
+  const oldPdfRef = useRef<HTMLIFrameElement>(null);
+  const newPdfRef = useRef<HTMLIFrameElement>(null);
 
   // Calculate statistics
   const totalAdded = report.pages.reduce((sum, p) => sum + p.added_boxes.length, 0);
@@ -21,6 +23,35 @@ export default function DiffReport({ report, onCompareAgain, oldFileName, newFil
   const totalVisual = report.pages.reduce((sum, p) => sum + p.visual_boxes.length, 0);
   const changedPages = report.pages.filter(p => p.status === "changed").length;
   const unchangedPages = report.pages.filter(p => p.status === "unchanged").length;
+
+  const handlePageClick = (pageIndex: number) => {
+    setSelectedPage(pageIndex);
+    // Scroll to PDF preview section
+    const pdfSection = document.getElementById("pdf-preview-section");
+    if (pdfSection) {
+      pdfSection.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    // Try to navigate PDFs to the page (works with PDF.js viewers)
+    // Note: This may not work with all PDF viewers, but provides visual feedback
+    setTimeout(() => {
+      const oldIframe = oldPdfRef.current;
+      const newIframe = newPdfRef.current;
+      if (oldIframe?.contentWindow) {
+        try {
+          oldIframe.contentWindow.postMessage({ type: "goToPage", page: pageIndex }, "*");
+        } catch (e) {
+          // Fallback: just highlight the selection
+        }
+      }
+      if (newIframe?.contentWindow) {
+        try {
+          newIframe.contentWindow.postMessage({ type: "goToPage", page: pageIndex }, "*");
+        } catch (e) {
+          // Fallback: just highlight the selection
+        }
+      }
+    }, 500);
+  };
 
   return (
     <section style={{ display: "grid", gap: "40px" }}>
@@ -40,17 +71,32 @@ export default function DiffReport({ report, onCompareAgain, oldFileName, newFil
             <h2
               style={{
                 margin: "0 0 8px 0",
-                fontSize: "2.5rem",
-                fontWeight: 800,
-                color: "#212529",
+                fontSize: "2rem",
+                fontWeight: 700,
+                color: "#111827",
                 letterSpacing: "-0.5px",
               }}
             >
-              📊 Comparison Results
+              Comparison Results
             </h2>
-            <p style={{ margin: 0, color: "#6c757d", fontSize: "1.05rem" }}>
-              Mode: <strong style={{ color: "#667eea" }}>{report.mode}</strong> — {report.mode_explanation}
-            </p>
+            <div style={{ marginTop: "12px", padding: "12px 16px", background: "#f3f4f6", borderRadius: "8px", fontSize: "0.9rem" }}>
+              <div style={{ marginBottom: "8px" }}>
+                <strong style={{ color: "#111827" }}>Mode:</strong> <span style={{ color: "#3b82f6", fontWeight: 600 }}>{report.mode === "speed" ? "Speed" : "Accuracy"}</span>
+              </div>
+              <div style={{ color: "#6b7280", lineHeight: "1.5" }}>
+                {report.mode === "speed" ? (
+                  <>
+                    <strong>Speed mode</strong> uses fast text extraction (pdfplumber) with OCR fallback. 
+                    Best for large PDFs and quick comparisons. May miss complex layout changes.
+                  </>
+                ) : (
+                  <>
+                    <strong>Accuracy mode</strong> uses layout-aware extraction (Unstructured/Docling) with OCR fallback. 
+                    Better for scanned PDFs, complex layouts, and mixed content. Slower but more reliable.
+                  </>
+                )}
+              </div>
+            </div>
           </div>
           {onCompareAgain && (
             <button
@@ -398,23 +444,26 @@ export default function DiffReport({ report, onCompareAgain, oldFileName, newFil
           {report.pages.map((page, idx) => (
             <div
               key={page.page_index}
+              onClick={() => handlePageClick(page.page_index)}
               style={{
-                padding: "20px 24px",
-                background: "white",
-                borderRadius: "12px",
-                border: "2px solid #f1f3f5",
-                transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
-                animation: `fadeInUp 0.3s ease-out ${idx * 0.05}s backwards`,
+                padding: "16px 20px",
+                background: selectedPage === page.page_index ? "#eff6ff" : "white",
+                borderRadius: "8px",
+                border: selectedPage === page.page_index ? "2px solid #3b82f6" : "1px solid #e5e7eb",
+                transition: "all 0.2s",
+                cursor: "pointer",
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.borderColor = "#667eea";
-                e.currentTarget.style.transform = "translateX(4px)";
-                e.currentTarget.style.boxShadow = "0 4px 16px rgba(102, 126, 234, 0.15)";
+                if (selectedPage !== page.page_index) {
+                  e.currentTarget.style.borderColor = "#3b82f6";
+                  e.currentTarget.style.background = "#f9fafb";
+                }
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = "#f1f3f5";
-                e.currentTarget.style.transform = "translateX(0)";
-                e.currentTarget.style.boxShadow = "none";
+                if (selectedPage !== page.page_index) {
+                  e.currentTarget.style.borderColor = "#e5e7eb";
+                  e.currentTarget.style.background = "white";
+                }
               }}
             >
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px", flexWrap: "wrap", gap: "12px" }}>
@@ -423,22 +472,28 @@ export default function DiffReport({ report, onCompareAgain, oldFileName, newFil
                     style={{
                       width: "40px",
                       height: "40px",
-                      background: "linear-gradient(135deg, #667eea, #764ba2)",
-                      borderRadius: "10px",
+                      background: selectedPage === page.page_index ? "#3b82f6" : "#f3f4f6",
+                      borderRadius: "8px",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
-                      color: "white",
+                      color: selectedPage === page.page_index ? "white" : "#6b7280",
                       fontWeight: 700,
                       fontSize: "0.9rem",
-                      boxShadow: "0 4px 12px rgba(102, 126, 234, 0.3)",
+                      border: selectedPage === page.page_index ? "2px solid #3b82f6" : "2px solid #e5e7eb",
+                      transition: "all 0.2s",
                     }}
                   >
                     {page.page_index + 1}
                   </div>
-                  <strong style={{ color: "#212529", fontSize: "1.15rem", fontWeight: 700 }}>
+                  <strong style={{ color: "#111827", fontSize: "1rem", fontWeight: 600 }}>
                     Page {page.page_index + 1}
                   </strong>
+                  {selectedPage === page.page_index && (
+                    <span style={{ fontSize: "0.85rem", color: "#3b82f6", fontWeight: 500 }}>
+                      (viewing in PDFs below)
+                    </span>
+                  )}
                 </div>
                 <span
                   style={{
@@ -526,10 +581,15 @@ export default function DiffReport({ report, onCompareAgain, oldFileName, newFil
       </div>
 
       {/* Annotated PDFs Preview */}
-      <div style={{ display: "grid", gap: "20px" }}>
-        <h3 style={{ margin: 0, fontSize: "1.8rem", fontWeight: 800, color: "#212529", letterSpacing: "-0.5px" }}>
-          👁️ Preview Annotated PDFs
+      <div id="pdf-preview-section" style={{ display: "grid", gap: "20px" }}>
+        <h3 style={{ margin: "0 0 8px 0", fontSize: "1.5rem", fontWeight: 700, color: "#111827" }}>
+          Preview Annotated PDFs
         </h3>
+        {selectedPage !== null && (
+          <div style={{ padding: "12px 16px", background: "#eff6ff", borderRadius: "8px", fontSize: "0.9rem", color: "#1e40af", marginBottom: "8px" }}>
+            📍 Viewing Page {selectedPage + 1} — Click any page above to jump to it
+          </div>
+        )}
         <div
           style={{
             display: "grid",
@@ -575,13 +635,13 @@ export default function DiffReport({ report, onCompareAgain, oldFileName, newFil
                 <span style={{ fontSize: "1.5em" }}>{pdf.icon}</span>
                 <strong style={{ color: "#212529", fontSize: "1.05rem", fontWeight: 700 }}>{pdf.title}</strong>
               </div>
-              <embed
-                src={`${base}${pdf.src}`}
-                type="application/pdf"
+              <iframe
+                ref={i === 0 ? oldPdfRef : newPdfRef}
+                src={`${base}${pdf.src}#page=${selectedPage !== null ? selectedPage + 1 : 1}`}
                 width="100%"
                 height="700px"
                 title={pdf.title}
-                style={{ display: "block" }}
+                style={{ border: "none", display: "block" }}
               />
             </div>
           ))}
@@ -638,12 +698,12 @@ export default function DiffReport({ report, onCompareAgain, oldFileName, newFil
           }
 
           div::-webkit-scrollbar-thumb {
-            background: linear-gradient(135deg, #667eea, #764ba2);
+            background: #3b82f6;
             border-radius: 4px;
           }
 
           div::-webkit-scrollbar-thumb:hover {
-            background: linear-gradient(135deg, #5568d3, #6a3f8f);
+            background: #2563eb;
           }
         `}
       </style>
