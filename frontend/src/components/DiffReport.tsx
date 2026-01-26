@@ -377,6 +377,28 @@ export default function DiffReport({ report, onCompareAgain, oldFileName, newFil
         </div>
 
         <div style={{ 
+          padding: "18px",
+          background: "#f0fdf4",
+          borderRadius: "8px",
+          border: "1px solid #bbf7d0",
+          marginBottom: "16px",
+        }}>
+          <div style={{ display: "flex", gap: "12px", alignItems: "flex-start" }}>
+            <span style={{ fontSize: "1.3em", flexShrink: 0 }}>🔄</span>
+            <div>
+              <div style={{ fontWeight: 700, color: "#166534", marginBottom: "6px", fontSize: "1rem" }}>
+                Moved Content Detection
+              </div>
+              <div style={{ color: "#15803d", fontSize: "0.95rem", lineHeight: "1.6" }}>
+                Our system automatically detects when content <strong>moves between pages</strong> (e.g., a paragraph moved from page 1 to page 2). 
+                Moved content is <strong>not highlighted as deleted + added</strong> — it's recognized as moved and won't show red/green highlights. 
+                Only truly deleted or newly added content gets highlighted.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div style={{ 
           padding: "16px",
           background: "#eff6ff",
           borderRadius: "8px",
