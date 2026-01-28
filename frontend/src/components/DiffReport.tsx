@@ -21,10 +21,10 @@ export default function DiffReport({ report }: DiffReportProps) {
       </div>
 
       <div style={{ display: "flex", gap: "16px", flexWrap: "wrap" }}>
-        <a href={`http://localhost:8000${report.downloads.annotated_old}`} target="_blank" rel="noreferrer">
+        <a href={`http://localhost:8010${report.downloads.annotated_old}`} target="_blank" rel="noreferrer">
           Download annotated original
         </a>
-        <a href={`http://localhost:8000${report.downloads.annotated_new}`} target="_blank" rel="noreferrer">
+        <a href={`http://localhost:8010${report.downloads.annotated_new}`} target="_blank" rel="noreferrer">
           Download annotated updated
         </a>
       </div>
@@ -42,20 +42,31 @@ export default function DiffReport({ report }: DiffReportProps) {
         ))}
       </div>
 
-      <div style={{ display: "grid", gap: "12px" }}>
+      <div
+        style={{
+          display: "grid",
+          gap: "12px",
+          width: "122%",
+          maxWidth: "100vw",
+          marginLeft: "50%",
+          transform: "translateX(-50%)",
+          padding: "0 24px",
+          boxSizing: "border-box",
+        }}
+      >
         <h3>Annotated PDFs</h3>
         <div style={{ display: "grid", gap: "12px", gridTemplateColumns: "1fr 1fr" }}>
           <embed
-            src={`http://localhost:8000${report.downloads.annotated_old}`}
+            src={`http://localhost:8010${report.downloads.annotated_old}`}
             type="application/pdf"
             width="100%"
-            height="500px"
+            height="750px"
           />
           <embed
-            src={`http://localhost:8000${report.downloads.annotated_new}`}
+            src={`http://localhost:8010${report.downloads.annotated_new}`}
             type="application/pdf"
             width="100%"
-            height="500px"
+            height="750px"
           />
         </div>
       </div>

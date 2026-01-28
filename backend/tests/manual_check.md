@@ -3,7 +3,7 @@
 1. Generate sample PDFs:
    - `python backend/tests/generate_samples.py`
 2. Start the backend:
-   - `uvicorn app:app --reload --port 8000`
+   - `uvicorn app:app --reload --port 8010`
 3. Start the frontend:
    - `npm install`
    - `npm run dev`

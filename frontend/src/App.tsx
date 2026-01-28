@@ -22,7 +22,7 @@ export default function App() {
   };
 
   return (
-    <main style={{ maxWidth: "960px", margin: "0 auto", padding: "24px" }}>
+    <main style={{ maxWidth: "1400px", width: "100%", margin: "0 auto", padding: "24px" }}>
       <h1>PDF Diff</h1>
       <p>Upload two PDFs to compare text and visual changes.</p>
       <UploadForm onSubmit={handleSubmit} isLoading={isLoading} />
