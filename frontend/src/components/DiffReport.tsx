@@ -654,6 +654,10 @@ export default function DiffReport({ report, onCompareAgain, oldFileName, newFil
             display: "grid",
             gap: "24px",
             gridTemplateColumns: "1fr 1fr",
+            width: "94vw",
+            marginLeft: "calc(50% - 47vw)",
+            marginRight: "calc(50% - 47vw)",
+            boxSizing: "border-box",
           }}
         >
           {[
@@ -698,7 +702,7 @@ export default function DiffReport({ report, onCompareAgain, oldFileName, newFil
                 ref={i === 0 ? oldPdfRef : newPdfRef}
                 src={`${base}${pdf.src}#page=${selectedPage !== null ? selectedPage + 1 : 1}`}
                 width="100%"
-                height="700px"
+                height="880px"
                 title={pdf.title}
                 style={{ border: "none", display: "block" }}
               />
