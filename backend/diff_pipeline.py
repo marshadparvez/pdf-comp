@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -26,6 +27,8 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     partition_pdf = None
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class PageDiff:
@@ -34,6 +37,14 @@ class PageDiff:
     removed_boxes: List[Tuple[float, float, float, float]]
     visual_boxes: List[Tuple[float, float, float, float]]
     status: str
+
+
+@dataclass
+class LineBox:
+    text: str
+    bbox: Tuple[float, float, float, float]
+    page_index: int
+    line_index: int
 
 
 def diff_word_boxes(
@@ -59,6 +70,43 @@ def diff_word_boxes(
                 added_boxes.append(merge_boxes(boxes))
 
     return added_boxes, removed_boxes
+
+
+def _build_line_boxes(
+    words: List[WordBox], page_index: int, y_tolerance: float = 3.0
+) -> List[LineBox]:
+    if not words:
+        return []
+
+    sorted_words = sorted(words, key=lambda w: (w.bbox[1], w.bbox[0]))
+    lines: List[List[WordBox]] = []
+    current: List[WordBox] = []
+    current_y: Optional[float] = None
+
+    for word in sorted_words:
+        y_center = (word.bbox[1] + word.bbox[3]) / 2.0
+        if current and current_y is not None and abs(y_center - current_y) > y_tolerance:
+            lines.append(current)
+            current = [word]
+            current_y = y_center
+        else:
+            current.append(word)
+            if current_y is None:
+                current_y = y_center
+            else:
+                current_y = (current_y * (len(current) - 1) + y_center) / len(current)
+
+    if current:
+        lines.append(current)
+
+    line_boxes: List[LineBox] = []
+    for line_index, line_words in enumerate(lines):
+        line_words_sorted = sorted(line_words, key=lambda w: w.bbox[0])
+        text = " ".join(w.text for w in line_words_sorted)
+        bbox = merge_boxes(w.bbox for w in line_words_sorted)
+        line_boxes.append(LineBox(text=text, bbox=bbox, page_index=page_index, line_index=line_index))
+
+    return line_boxes
 
 
 def _scale_ocr_words(words: List[WordBox], scale: float) -> List[WordBox]:
@@ -172,9 +220,11 @@ def _compare_pdfs(
     old_words_map: Optional[Dict[int, List[WordBox]]] = None,
     new_words_map: Optional[Dict[int, List[WordBox]]] = None,
 ) -> Dict:
+    logger.info("Starting PDF comparison")
     output_dir.mkdir(parents=True, exist_ok=True)
     old_doc = fitz.open(old_path)
     new_doc = fitz.open(new_path)
+    logger.info("Opened PDFs: old_pages=%d new_pages=%d", old_doc.page_count, new_doc.page_count)
 
     max_pages = max(old_doc.page_count, new_doc.page_count)
     pages: List[PageDiff] = []
@@ -185,6 +235,11 @@ def _compare_pdfs(
 
     old_words_map = old_words_map or {}
     new_words_map = new_words_map or {}
+
+    added_boxes_by_page: Dict[int, List[Tuple[float, float, float, float]]] = {}
+    removed_boxes_by_page: Dict[int, List[Tuple[float, float, float, float]]] = {}
+    old_lines_by_page: Dict[int, List[LineBox]] = {}
+    new_lines_by_page: Dict[int, List[LineBox]] = {}
 
     # First pass: collect all words with page context for cross-page matching
     old_words_with_page: List[Tuple[WordBox, int]] = []
@@ -199,6 +254,7 @@ def _compare_pdfs(
         has_new = page_index < new_doc.page_count
 
         if not has_old or not has_new:
+            logger.info("Page %d: %s", page_index + 1, "removed" if has_old else "added")
             if has_old:
                 page = old_doc.load_page(page_index)
                 width, height = page.rect.width, page.rect.height
@@ -235,8 +291,10 @@ def _compare_pdfs(
         new_words = new_words_map.get(page_index) or extract_words_from_page(new_page)
 
         if len(old_words) < 10:
+            logger.info("Page %d: OCR fallback for old PDF (word_count=%d)", page_index + 1, len(old_words))
             old_words = _scale_ocr_words(ocr_words_from_image(old_image), old_scale)
         if len(new_words) < 10:
+            logger.info("Page %d: OCR fallback for new PDF (word_count=%d)", page_index + 1, len(new_words))
             new_words = _scale_ocr_words(ocr_words_from_image(new_image), new_scale)
 
         # Store words for later reference
@@ -250,9 +308,6 @@ def _compare_pdfs(
         all_old_words.extend(old_words)
         all_new_words.extend(new_words)
 
-        # Page-by-page diff (for initial comparison)
-        added_boxes, removed_boxes = diff_word_boxes(old_words, new_words)
-
         visual_boxes = compute_visual_diff_boxes(old_image, new_image)
         visual_boxes = scale_boxes(visual_boxes, min(old_scale, new_scale))
         visual_scores.append(compute_visual_similarity(old_image, new_image))
@@ -260,16 +315,112 @@ def _compare_pdfs(
         pages.append(
             PageDiff(
                 page_index=page_index,
-                added_boxes=added_boxes,
-                removed_boxes=removed_boxes,
+                added_boxes=[],
+                removed_boxes=[],
                 visual_boxes=visual_boxes,
-                status="changed" if (added_boxes or removed_boxes or visual_boxes) else "unchanged",
+                status="changed" if visual_boxes else "unchanged",
             )
+        )
+        logger.info(
+            "Page %d: status=%s added=%d removed=%d visual=%d",
+            page_index + 1,
+            pages[-1].status,
+            0,
+            0,
+            len(visual_boxes),
+        )
+
+    # Build line boxes for line-level alignment
+    for page_index in range(max_pages):
+        if page_index < old_doc.page_count:
+            old_lines_by_page[page_index] = _build_line_boxes(
+                stored_old_words.get(page_index, []), page_index
+            )
+        if page_index < new_doc.page_count:
+            new_lines_by_page[page_index] = _build_line_boxes(
+                stored_new_words.get(page_index, []), page_index
+            )
+
+    # Line-level alignment using a streaming cursor in the new PDF
+    logger.info("Running line-level alignment (streaming cursor)")
+    all_new_lines: List[LineBox] = []
+    for new_page_idx in range(new_doc.page_count):
+        all_new_lines.extend(new_lines_by_page.get(new_page_idx, []))
+
+    new_cursor = 0
+    for page_index in range(old_doc.page_count):
+        old_lines = old_lines_by_page.get(page_index, [])
+        if not old_lines:
+            continue
+
+        remaining_new = all_new_lines[new_cursor:]
+        if not remaining_new:
+            # No new lines left: all remaining old lines are removed
+            removed_boxes_by_page.setdefault(page_index, []).append(
+                merge_boxes([line.bbox for line in old_lines])
+            )
+            continue
+
+        matcher = SequenceMatcher(
+            a=[line.text for line in old_lines],
+            b=[line.text for line in remaining_new],
+        )
+
+        matched_old_indices: set[int] = set()
+        matched_new_indices: set[int] = set()
+
+        opcodes = matcher.get_opcodes()
+        for tag, i1, i2, j1, j2 in opcodes:
+            if tag == "equal":
+                matched_old_indices.update(range(i1, i2))
+                matched_new_indices.update(range(j1, j2))
+
+        last_matched_new = max(matched_new_indices) if matched_new_indices else -1
+
+        for tag, i1, i2, j1, j2 in opcodes:
+            if tag == "equal":
+                continue
+            if tag in ("delete", "replace"):
+                boxes = [line.bbox for line in old_lines[i1:i2]]
+                if boxes:
+                    removed_boxes_by_page.setdefault(page_index, []).append(merge_boxes(boxes))
+            if tag in ("insert", "replace"):
+                # Only count insertions that occur before or at the last matched new line
+                if last_matched_new >= 0 and j1 > last_matched_new:
+                    continue
+                capped_j2 = min(j2, last_matched_new + 1) if last_matched_new >= 0 else 0
+                if capped_j2 <= j1:
+                    continue
+                boxes_by_page: Dict[int, List[Tuple[float, float, float, float]]] = {}
+                for line in remaining_new[j1:capped_j2]:
+                    boxes_by_page.setdefault(line.page_index, []).append(line.bbox)
+                for page_idx, boxes in boxes_by_page.items():
+                    added_boxes_by_page.setdefault(page_idx, []).append(merge_boxes(boxes))
+
+        # Advance cursor to the last matched new line + 1 if any match happened,
+        # otherwise skip inserted lines and move to end of compared window.
+        if matched_new_indices:
+            new_cursor += max(matched_new_indices) + 1
+        else:
+            new_cursor += len(remaining_new)
+
+    # Apply line-level diff results to pages
+    for page_diff in pages:
+        if page_diff.status in ("added_page", "removed_page"):
+            continue
+        page_index = page_diff.page_index
+        page_diff.added_boxes = added_boxes_by_page.get(page_index, [])
+        page_diff.removed_boxes = removed_boxes_by_page.get(page_index, [])
+        page_diff.status = (
+            "changed"
+            if (page_diff.added_boxes or page_diff.removed_boxes or page_diff.visual_boxes)
+            else "unchanged"
         )
 
     # Second pass: Cross-page matching to detect moved content
     # This identifies when content moved from one page to another
     if old_words_with_page and new_words_with_page:
+        logger.info("Running cross-page moved-content cleanup")
         # Build word-to-box mappings for each page to track which boxes contain which words
         old_page_word_indices: Dict[int, List[int]] = {}  # page -> list of global word indices
         new_page_word_indices: Dict[int, List[int]] = {}
@@ -387,6 +538,7 @@ def _compare_pdfs(
                 pass
             elif not filtered_removed and not filtered_added and not page_diff.visual_boxes:
                 page_diff.status = "unchanged"
+        logger.info("Cross-page cleanup complete")
 
     text_similarity = SequenceMatcher(
         a=normalize_text(all_old_words), b=normalize_text(all_new_words)
@@ -394,6 +546,12 @@ def _compare_pdfs(
     visual_similarity = sum(visual_scores) / len(visual_scores) if visual_scores else 0.0
     similarity_score = 0.6 * text_similarity + 0.4 * visual_similarity
     low_confidence = similarity_score < 0.5
+    logger.info(
+        "Similarity computed: text=%.4f visual=%.4f combined=%.4f",
+        text_similarity,
+        visual_similarity,
+        similarity_score,
+    )
 
     job_id = uuid.uuid4().hex
     annotated_old = output_dir / f"{job_id}_old_annotated.pdf"
@@ -401,6 +559,7 @@ def _compare_pdfs(
 
     old_doc_annot = fitz.open(old_path)
     new_doc_annot = fitz.open(new_path)
+    logger.info("Annotating PDFs")
 
     for page in pages:
         if page.page_index < old_doc_annot.page_count:
@@ -418,6 +577,7 @@ def _compare_pdfs(
     new_doc_annot.close()
     old_doc.close()
     new_doc.close()
+    logger.info("Comparison complete: job_id=%s", job_id)
 
     report_pages = [
         {
@@ -441,10 +601,12 @@ def _compare_pdfs(
 
 
 def compare_pdfs_speed(old_path: Path, new_path: Path, output_dir: Path) -> Dict:
+    logger.info("Mode: speed")
     return _compare_pdfs(old_path, new_path, output_dir)
 
 
 def compare_pdfs_accuracy(old_path: Path, new_path: Path, output_dir: Path) -> Dict:
+    logger.info("Mode: accuracy (unstructured=%s)", "enabled" if partition_pdf else "missing")
     old_words_map = _extract_unstructured_words(old_path)
     new_words_map = _extract_unstructured_words(new_path)
     return _compare_pdfs(old_path, new_path, output_dir, old_words_map, new_words_map)
