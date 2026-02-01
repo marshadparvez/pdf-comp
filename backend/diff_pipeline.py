@@ -16,7 +16,6 @@ from pdf_utils import (
     compute_visual_similarity,
     extract_words_from_page,
     merge_boxes,
-    normalize_text,
     ocr_words_from_image,
     render_page_image,
     scale_boxes,
@@ -540,18 +539,10 @@ def _compare_pdfs(
                 page_diff.status = "unchanged"
         logger.info("Cross-page cleanup complete")
 
-    text_similarity = SequenceMatcher(
-        a=normalize_text(all_old_words), b=normalize_text(all_new_words)
-    ).ratio()
     visual_similarity = sum(visual_scores) / len(visual_scores) if visual_scores else 0.0
-    similarity_score = 0.6 * text_similarity + 0.4 * visual_similarity
+    similarity_score = visual_similarity
     low_confidence = similarity_score < 0.5
-    logger.info(
-        "Similarity computed: text=%.4f visual=%.4f combined=%.4f",
-        text_similarity,
-        visual_similarity,
-        similarity_score,
-    )
+    logger.info("Similarity computed: visual=%.4f", similarity_score)
 
     job_id = uuid.uuid4().hex
     annotated_old = output_dir / f"{job_id}_old_annotated.pdf"
