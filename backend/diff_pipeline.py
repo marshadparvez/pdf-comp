@@ -255,30 +255,35 @@ def _compare_pdfs(
 
         if not has_old or not has_new:
             logger.info("Page %d: %s", page_index + 1, "removed" if has_old else "added")
+            if has_new:
+                new_page = new_doc.load_page(page_index)
+                new_image, new_scale = render_page_image(new_page)
+                new_words = new_words_map.get(page_index) or extract_words_from_page(new_page)
+                if len(new_words) < 10:
+                    logger.info("Page %d: OCR fallback for new PDF (word_count=%d)", page_index + 1, len(new_words))
+                    new_words = _scale_ocr_words(ocr_words_from_image(new_image), new_scale)
+                stored_new_words[page_index] = new_words
+                new_words_with_page.extend([(w, page_index) for w in new_words])
+                all_new_words.extend(new_words)
             if has_old:
-                page = old_doc.load_page(page_index)
-                width, height = page.rect.width, page.rect.height
-                pages.append(
-                    PageDiff(
-                        page_index=page_index,
-                        added_boxes=[],
-                        removed_boxes=[(0.0, 0.0, width, height)],
-                        visual_boxes=[],
-                        status="removed_page",
-                    )
+                old_page = old_doc.load_page(page_index)
+                old_image, old_scale = render_page_image(old_page)
+                old_words = old_words_map.get(page_index) or extract_words_from_page(old_page)
+                if len(old_words) < 10:
+                    logger.info("Page %d: OCR fallback for old PDF (word_count=%d)", page_index + 1, len(old_words))
+                    old_words = _scale_ocr_words(ocr_words_from_image(old_image), old_scale)
+                stored_old_words[page_index] = old_words
+                old_words_with_page.extend([(w, page_index) for w in old_words])
+                all_old_words.extend(old_words)
+            pages.append(
+                PageDiff(
+                    page_index=page_index,
+                    added_boxes=[],
+                    removed_boxes=[],
+                    visual_boxes=[],
+                    status="removed_page" if has_old else "added_page",
                 )
-            else:
-                page = new_doc.load_page(page_index)
-                width, height = page.rect.width, page.rect.height
-                pages.append(
-                    PageDiff(
-                        page_index=page_index,
-                        added_boxes=[(0.0, 0.0, width, height)],
-                        removed_boxes=[],
-                        visual_boxes=[],
-                        status="added_page",
-                    )
-                )
+            )
             continue
 
         old_page = old_doc.load_page(page_index)
@@ -341,68 +346,72 @@ def _compare_pdfs(
                 stored_new_words.get(page_index, []), page_index
             )
 
-    # Line-level alignment using a streaming cursor in the new PDF
+    # Line-level alignment using a greedy streaming cursor in the new PDF
     logger.info("Running line-level alignment (streaming cursor)")
     all_new_lines: List[LineBox] = []
     for new_page_idx in range(new_doc.page_count):
-        all_new_lines.extend(new_lines_by_page.get(new_page_idx, []))
+        page_lines = new_lines_by_page.get(new_page_idx, [])
+        logger.info("New page %d lines=%d", new_page_idx + 1, len(page_lines))
+        all_new_lines.extend(page_lines)
+    logger.info("New stream total lines=%d", len(all_new_lines))
 
     new_cursor = 0
     for page_index in range(old_doc.page_count):
         old_lines = old_lines_by_page.get(page_index, [])
         if not old_lines:
             continue
+        logger.info("Page %d: stream cursor start=%d", page_index + 1, new_cursor)
 
-        remaining_new = all_new_lines[new_cursor:]
-        if not remaining_new:
-            # No new lines left: all remaining old lines are removed
+        if new_cursor >= len(all_new_lines):
             removed_boxes_by_page.setdefault(page_index, []).append(
                 merge_boxes([line.bbox for line in old_lines])
             )
             continue
 
-        matcher = SequenceMatcher(
-            a=[line.text for line in old_lines],
-            b=[line.text for line in remaining_new],
-        )
+        insert_blocks: Dict[int, List[Tuple[float, float, float, float]]] = {}
+        delete_block: List[Tuple[float, float, float, float]] = []
 
-        matched_old_indices: set[int] = set()
-        matched_new_indices: set[int] = set()
+        for old_line in old_lines:
+            match_index = None
+            for j in range(new_cursor, len(all_new_lines)):
+                if all_new_lines[j].text == old_line.text:
+                    match_index = j
+                    break
 
-        opcodes = matcher.get_opcodes()
-        for tag, i1, i2, j1, j2 in opcodes:
-            if tag == "equal":
-                matched_old_indices.update(range(i1, i2))
-                matched_new_indices.update(range(j1, j2))
-
-        last_matched_new = max(matched_new_indices) if matched_new_indices else -1
-
-        for tag, i1, i2, j1, j2 in opcodes:
-            if tag == "equal":
+            if match_index is None:
+                delete_block.append(old_line.bbox)
                 continue
-            if tag in ("delete", "replace"):
-                boxes = [line.bbox for line in old_lines[i1:i2]]
-                if boxes:
-                    removed_boxes_by_page.setdefault(page_index, []).append(merge_boxes(boxes))
-            if tag in ("insert", "replace"):
-                # Only count insertions that occur before or at the last matched new line
-                if last_matched_new >= 0 and j1 > last_matched_new:
-                    continue
-                capped_j2 = min(j2, last_matched_new + 1) if last_matched_new >= 0 else 0
-                if capped_j2 <= j1:
-                    continue
-                boxes_by_page: Dict[int, List[Tuple[float, float, float, float]]] = {}
-                for line in remaining_new[j1:capped_j2]:
-                    boxes_by_page.setdefault(line.page_index, []).append(line.bbox)
-                for page_idx, boxes in boxes_by_page.items():
-                    added_boxes_by_page.setdefault(page_idx, []).append(merge_boxes(boxes))
 
-        # Advance cursor to the last matched new line + 1 if any match happened,
-        # otherwise skip inserted lines and move to end of compared window.
-        if matched_new_indices:
-            new_cursor += max(matched_new_indices) + 1
-        else:
-            new_cursor += len(remaining_new)
+            if delete_block:
+                removed_boxes_by_page.setdefault(page_index, []).append(merge_boxes(delete_block))
+                delete_block = []
+
+            for j in range(new_cursor, match_index):
+                new_line = all_new_lines[j]
+                insert_blocks.setdefault(new_line.page_index, []).append(new_line.bbox)
+
+            new_cursor = match_index + 1
+        logger.info("Page %d: stream cursor end=%d", page_index + 1, new_cursor)
+
+        if delete_block:
+            removed_boxes_by_page.setdefault(page_index, []).append(merge_boxes(delete_block))
+
+        for page_idx, boxes in insert_blocks.items():
+            if boxes:
+                added_boxes_by_page.setdefault(page_idx, []).append(merge_boxes(boxes))
+
+    # Any remaining new lines after the last old page are pure additions.
+    if new_cursor < len(all_new_lines):
+        logger.info(
+            "Stream tail: remaining_new_lines=%d from cursor=%d",
+            len(all_new_lines) - new_cursor,
+            new_cursor,
+        )
+        remaining_by_page: Dict[int, List[Tuple[float, float, float, float]]] = {}
+        for line in all_new_lines[new_cursor:]:
+            remaining_by_page.setdefault(line.page_index, []).append(line.bbox)
+        for page_idx, boxes in remaining_by_page.items():
+            added_boxes_by_page.setdefault(page_idx, []).append(merge_boxes(boxes))
 
     # Apply line-level diff results to pages
     for page_diff in pages:
