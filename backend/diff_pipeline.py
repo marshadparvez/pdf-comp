@@ -12,13 +12,10 @@ import fitz
 from pdf_utils import (
     WordBox,
     add_highlights,
-    compute_visual_diff_boxes,
-    compute_visual_similarity,
     extract_words_from_page,
     merge_boxes,
     ocr_words_from_image,
     render_page_image,
-    scale_boxes,
 )
 
 try:
@@ -230,8 +227,6 @@ def _compare_pdfs(
 
     all_old_words: List[WordBox] = []
     all_new_words: List[WordBox] = []
-    visual_scores: List[float] = []
-
     old_words_map = old_words_map or {}
     new_words_map = new_words_map or {}
 
@@ -307,9 +302,7 @@ def _compare_pdfs(
         all_old_words.extend(old_words)
         all_new_words.extend(new_words)
 
-        visual_boxes = compute_visual_diff_boxes(old_image, new_image)
-        visual_boxes = scale_boxes(visual_boxes, min(old_scale, new_scale))
-        visual_scores.append(compute_visual_similarity(old_image, new_image))
+        visual_boxes: List[Tuple[float, float, float, float]] = []
 
         pages.append(
             PageDiff(
@@ -539,10 +532,9 @@ def _compare_pdfs(
                 page_diff.status = "unchanged"
         logger.info("Cross-page cleanup complete")
 
-    visual_similarity = sum(visual_scores) / len(visual_scores) if visual_scores else 0.0
-    similarity_score = visual_similarity
-    low_confidence = similarity_score < 0.5
-    logger.info("Similarity computed: visual=%.4f", similarity_score)
+    similarity_score = 0.0
+    low_confidence = False
+    logger.info("Similarity computed: visual disabled")
 
     job_id = uuid.uuid4().hex
     annotated_old = output_dir / f"{job_id}_old_annotated.pdf"
@@ -556,11 +548,9 @@ def _compare_pdfs(
         if page.page_index < old_doc_annot.page_count:
             old_page = old_doc_annot.load_page(page.page_index)
             add_highlights(old_page, page.removed_boxes, color=(1, 0, 0))
-            add_highlights(old_page, page.visual_boxes, color=(1, 1, 0))
         if page.page_index < new_doc_annot.page_count:
             new_page = new_doc_annot.load_page(page.page_index)
             add_highlights(new_page, page.added_boxes, color=(0, 1, 0))
-            add_highlights(new_page, page.visual_boxes, color=(1, 1, 0))
 
     old_doc_annot.save(annotated_old)
     new_doc_annot.save(annotated_new)
