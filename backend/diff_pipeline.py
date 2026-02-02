@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 import uuid
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -103,6 +104,91 @@ def _build_line_boxes(
         line_boxes.append(LineBox(text=text, bbox=bbox, page_index=page_index, line_index=line_index))
 
     return line_boxes
+
+
+def _merge_line_boxes_by_gap(
+    items: List[object], max_gap: float = 6.0
+) -> List[Tuple[float, float, float, float]]:
+    if not items:
+        return []
+
+    def to_bbox(item: object) -> Tuple[float, float, float, float]:
+        if isinstance(item, LineBox):
+            return item.bbox
+        return item  # assume it's already a bbox tuple
+
+    bboxes = [to_bbox(item) for item in items]
+    bboxes = [b for b in bboxes if len(b) == 4]
+    if not bboxes:
+        return []
+    sorted_boxes = sorted(bboxes, key=lambda b: (b[1], b[0]))
+    merged: List[Tuple[float, float, float, float]] = []
+    current: List[Tuple[float, float, float, float]] = [sorted_boxes[0]]
+    last_bottom = sorted_boxes[0][3]
+
+    for box in sorted_boxes[1:]:
+        gap = box[1] - last_bottom
+        if gap <= max_gap:
+            current.append(box)
+        else:
+            merged.append(merge_boxes(current))
+            current = [box]
+        last_bottom = box[3]
+
+    if current:
+        merged.append(merge_boxes(current))
+    return merged
+
+
+def _normalize_header_footer_line(text: str) -> str:
+    # Replace digit runs so page numbers/timestamps don't block header/footer detection.
+    return re.sub(r"\d+", "<#>", text.strip())
+
+
+def _detect_repeating_header_footer(
+    lines_by_page: Dict[int, List[LineBox]],
+    page_count: int,
+    sample_lines: int = 3,
+    threshold_ratio: float = 0.6,
+) -> set:
+    counts: Dict[str, int] = {}
+    for page_index in range(page_count):
+        lines = lines_by_page.get(page_index, [])
+        if not lines:
+            continue
+        head = lines[:sample_lines]
+        tail = lines[-sample_lines:] if len(lines) > sample_lines else lines
+        for line in head + tail:
+            key = _normalize_header_footer_line(line.text)
+            counts[key] = counts.get(key, 0) + 1
+    threshold = max(2, int(page_count * threshold_ratio))
+    return {key for key, count in counts.items() if count >= threshold}
+
+
+def _filter_header_footer_lines(
+    lines_by_page: Dict[int, List[LineBox]],
+    page_count: int,
+    header_footer_keys: set,
+    sample_lines: int = 3,
+) -> Dict[int, List[LineBox]]:
+    filtered: Dict[int, List[LineBox]] = {}
+    for page_index in range(page_count):
+        lines = lines_by_page.get(page_index, [])
+        if not lines:
+            continue
+        head = lines[:sample_lines]
+        tail = lines[-sample_lines:] if len(lines) > sample_lines else []
+        mid = lines[sample_lines:len(lines) - sample_lines] if len(lines) > sample_lines * 2 else []
+
+        def keep(line: LineBox) -> bool:
+            return _normalize_header_footer_line(line.text) not in header_footer_keys
+
+        kept = [line for line in head if keep(line)] + mid + [line for line in tail if keep(line)]
+        # Reindex line_index for consistency
+        for idx, line in enumerate(kept):
+            line.line_index = idx
+        filtered[page_index] = kept
+    return filtered
 
 
 def _scale_ocr_words(words: List[WordBox], scale: float) -> List[WordBox]:
@@ -339,6 +425,22 @@ def _compare_pdfs(
                 stored_new_words.get(page_index, []), page_index
             )
 
+    # Detect repeating header/footer lines and filter them out before alignment
+    header_footer_old = _detect_repeating_header_footer(old_lines_by_page, old_doc.page_count)
+    header_footer_new = _detect_repeating_header_footer(new_lines_by_page, new_doc.page_count)
+    if header_footer_old or header_footer_new:
+        logger.info(
+            "Header/footer detection: old=%d new=%d",
+            len(header_footer_old),
+            len(header_footer_new),
+        )
+    old_lines_by_page = _filter_header_footer_lines(
+        old_lines_by_page, old_doc.page_count, header_footer_old
+    )
+    new_lines_by_page = _filter_header_footer_lines(
+        new_lines_by_page, new_doc.page_count, header_footer_new
+    )
+
     # Line-level alignment using a greedy streaming cursor in the new PDF
     logger.info("Running line-level alignment (streaming cursor)")
     all_new_lines: List[LineBox] = []
@@ -361,17 +463,51 @@ def _compare_pdfs(
             )
             continue
 
-        debug_page = (page_index == 22)  # page 23 (1-based)
         logged_mismatch = False
 
-        insert_blocks: Dict[int, List[Tuple[float, float, float, float]]] = {}
-        delete_block: List[Tuple[float, float, float, float]] = []
+        insert_blocks: Dict[int, List[LineBox]] = {}
+        delete_block: List[LineBox] = []
 
         old_idx = 0
+        max_lookahead = max(20, len(old_lines) * 2)
+        # Guarded resync: snap to a nearby match for the first line if it
+        # preserves at least 2 of the first 5 lines within 30 lines.
+        if old_lines:
+            anchor_lines = [line.text for line in old_lines[:5]]
+            anchor_first = anchor_lines[0]
+            search_end = min(len(all_new_lines), new_cursor + max_lookahead)
+            try:
+                candidate = next(
+                    i
+                    for i in range(new_cursor, search_end)
+                    if all_new_lines[i].text == anchor_first
+                )
+            except StopIteration:
+                candidate = None
+            if candidate is not None:
+                matches = 1
+                probe_idx = candidate + 1
+                for anchor in anchor_lines[1:]:
+                    while probe_idx < len(all_new_lines) and probe_idx <= candidate + 30:
+                        if all_new_lines[probe_idx].text == anchor:
+                            matches += 1
+                            probe_idx += 1
+                            break
+                        probe_idx += 1
+                if matches >= 2 and candidate != new_cursor:
+                    logger.info(
+                        "Page %d: resync cursor from %d to %d (matches=%d)",
+                        page_index + 1,
+                        new_cursor,
+                        candidate,
+                        matches,
+                    )
+                    new_cursor = candidate
         while old_idx < len(old_lines):
             old_line = old_lines[old_idx]
             match_index = None
-            for j in range(new_cursor, len(all_new_lines)):
+            search_end = min(len(all_new_lines), new_cursor + max_lookahead)
+            for j in range(new_cursor, search_end):
                 if all_new_lines[j].text == old_line.text:
                     match_index = j
                     break
@@ -389,48 +525,49 @@ def _compare_pdfs(
                         break
                 if replace_span:
                     if delete_block:
-                        removed_boxes_by_page.setdefault(page_index, []).append(merge_boxes(delete_block))
+                        removed_boxes_by_page.setdefault(page_index, []).extend(
+                            _merge_line_boxes_by_gap(delete_block)
+                        )
                         delete_block = []
-                    removed_boxes_by_page.setdefault(page_index, []).append(
-                        merge_boxes([line.bbox for line in old_lines[old_idx:old_idx + replace_span]])
+                    removed_boxes_by_page.setdefault(page_index, []).extend(
+                        _merge_line_boxes_by_gap(old_lines[old_idx:old_idx + replace_span])
                     )
                     for line in all_new_lines[new_cursor:new_cursor + replace_span]:
-                        insert_blocks.setdefault(line.page_index, []).append(line.bbox)
+                        insert_blocks.setdefault(line.page_index, []).append(line)
                     new_cursor += replace_span
                     old_idx += replace_span
                     continue
 
-                if debug_page and not logged_mismatch:
-                    snippet = [all_new_lines[k].text for k in range(new_cursor, min(new_cursor + 5, len(all_new_lines)))]
-                    logger.info(
-                        "Page 23 first mismatch: old_line=%r new_cursor=%d new_snippet=%r",
-                        old_line.text,
-                        new_cursor,
-                        snippet,
-                    )
+                if not logged_mismatch:
                     logged_mismatch = True
-                delete_block.append(old_line.bbox)
+                delete_block.append(old_line)
                 old_idx += 1
                 continue
 
             if delete_block:
-                removed_boxes_by_page.setdefault(page_index, []).append(merge_boxes(delete_block))
+                removed_boxes_by_page.setdefault(page_index, []).extend(
+                    _merge_line_boxes_by_gap(delete_block)
+                )
                 delete_block = []
 
             for j in range(new_cursor, match_index):
                 new_line = all_new_lines[j]
-                insert_blocks.setdefault(new_line.page_index, []).append(new_line.bbox)
+                insert_blocks.setdefault(new_line.page_index, []).append(new_line)
 
             new_cursor = match_index + 1
             old_idx += 1
         logger.info("Page %d: stream cursor end=%d", page_index + 1, new_cursor)
 
         if delete_block:
-            removed_boxes_by_page.setdefault(page_index, []).append(merge_boxes(delete_block))
+            removed_boxes_by_page.setdefault(page_index, []).extend(
+                _merge_line_boxes_by_gap(delete_block)
+            )
 
-        for page_idx, boxes in insert_blocks.items():
-            if boxes:
-                added_boxes_by_page.setdefault(page_idx, []).append(merge_boxes(boxes))
+        for page_idx, lines in insert_blocks.items():
+            if lines:
+                added_boxes_by_page.setdefault(page_idx, []).extend(
+                    _merge_line_boxes_by_gap(lines)
+                )
 
     # Any remaining new lines after the last old page are pure additions.
     if new_cursor < len(all_new_lines):
@@ -441,9 +578,11 @@ def _compare_pdfs(
         )
         remaining_by_page: Dict[int, List[Tuple[float, float, float, float]]] = {}
         for line in all_new_lines[new_cursor:]:
-            remaining_by_page.setdefault(line.page_index, []).append(line.bbox)
-        for page_idx, boxes in remaining_by_page.items():
-            added_boxes_by_page.setdefault(page_idx, []).append(merge_boxes(boxes))
+            remaining_by_page.setdefault(line.page_index, []).append(line)
+        for page_idx, lines in remaining_by_page.items():
+            added_boxes_by_page.setdefault(page_idx, []).extend(
+                _merge_line_boxes_by_gap(lines)
+            )
 
     # Apply line-level diff results to pages
     for page_diff in pages:
