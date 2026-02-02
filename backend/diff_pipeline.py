@@ -367,7 +367,9 @@ def _compare_pdfs(
         insert_blocks: Dict[int, List[Tuple[float, float, float, float]]] = {}
         delete_block: List[Tuple[float, float, float, float]] = []
 
-        for old_line in old_lines:
+        old_idx = 0
+        while old_idx < len(old_lines):
+            old_line = old_lines[old_idx]
             match_index = None
             for j in range(new_cursor, len(all_new_lines)):
                 if all_new_lines[j].text == old_line.text:
@@ -375,6 +377,29 @@ def _compare_pdfs(
                     break
 
             if match_index is None:
+                # Multi-line replace: if the next k lines align, treat as replace block.
+                replace_span = 0
+                for k in range(1, 11):
+                    if old_idx + k >= len(old_lines):
+                        break
+                    if new_cursor + k >= len(all_new_lines):
+                        break
+                    if old_lines[old_idx + k].text == all_new_lines[new_cursor + k].text:
+                        replace_span = k
+                        break
+                if replace_span:
+                    if delete_block:
+                        removed_boxes_by_page.setdefault(page_index, []).append(merge_boxes(delete_block))
+                        delete_block = []
+                    removed_boxes_by_page.setdefault(page_index, []).append(
+                        merge_boxes([line.bbox for line in old_lines[old_idx:old_idx + replace_span]])
+                    )
+                    for line in all_new_lines[new_cursor:new_cursor + replace_span]:
+                        insert_blocks.setdefault(line.page_index, []).append(line.bbox)
+                    new_cursor += replace_span
+                    old_idx += replace_span
+                    continue
+
                 if debug_page and not logged_mismatch:
                     snippet = [all_new_lines[k].text for k in range(new_cursor, min(new_cursor + 5, len(all_new_lines)))]
                     logger.info(
@@ -385,6 +410,7 @@ def _compare_pdfs(
                     )
                     logged_mismatch = True
                 delete_block.append(old_line.bbox)
+                old_idx += 1
                 continue
 
             if delete_block:
@@ -396,6 +422,7 @@ def _compare_pdfs(
                 insert_blocks.setdefault(new_line.page_index, []).append(new_line.bbox)
 
             new_cursor = match_index + 1
+            old_idx += 1
         logger.info("Page %d: stream cursor end=%d", page_index + 1, new_cursor)
 
         if delete_block:
