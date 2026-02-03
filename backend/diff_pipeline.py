@@ -33,6 +33,8 @@ class PageDiff:
     added_boxes: List[Tuple[float, float, float, float]]
     removed_boxes: List[Tuple[float, float, float, float]]
     visual_boxes: List[Tuple[float, float, float, float]]
+    replaced_old_boxes: List[Tuple[float, float, float, float]]
+    replaced_new_boxes: List[Tuple[float, float, float, float]]
     status: str
 
 
@@ -319,6 +321,8 @@ def _compare_pdfs(
 
     added_boxes_by_page: Dict[int, List[Tuple[float, float, float, float]]] = {}
     removed_boxes_by_page: Dict[int, List[Tuple[float, float, float, float]]] = {}
+    replaced_old_by_page: Dict[int, List[Tuple[float, float, float, float]]] = {}
+    replaced_new_by_page: Dict[int, List[Tuple[float, float, float, float]]] = {}
     old_lines_by_page: Dict[int, List[LineBox]] = {}
     new_lines_by_page: Dict[int, List[LineBox]] = {}
 
@@ -362,6 +366,8 @@ def _compare_pdfs(
                     added_boxes=[],
                     removed_boxes=[],
                     visual_boxes=[],
+                    replaced_old_boxes=[],
+                    replaced_new_boxes=[],
                     status="removed_page" if has_old else "added_page",
                 )
             )
@@ -402,6 +408,8 @@ def _compare_pdfs(
                 added_boxes=[],
                 removed_boxes=[],
                 visual_boxes=visual_boxes,
+                replaced_old_boxes=[],
+                replaced_new_boxes=[],
                 status="unchanged",
             )
         )
@@ -529,11 +537,13 @@ def _compare_pdfs(
                             _merge_line_boxes_by_gap(delete_block)
                         )
                         delete_block = []
-                    removed_boxes_by_page.setdefault(page_index, []).extend(
+                    replaced_old_by_page.setdefault(page_index, []).extend(
                         _merge_line_boxes_by_gap(old_lines[old_idx:old_idx + replace_span])
                     )
                     for line in all_new_lines[new_cursor:new_cursor + replace_span]:
-                        insert_blocks.setdefault(line.page_index, []).append(line)
+                        replaced_new_by_page.setdefault(line.page_index, []).extend(
+                            _merge_line_boxes_by_gap([line])
+                        )
                     new_cursor += replace_span
                     old_idx += replace_span
                     continue
@@ -591,9 +601,17 @@ def _compare_pdfs(
         page_index = page_diff.page_index
         page_diff.added_boxes = added_boxes_by_page.get(page_index, [])
         page_diff.removed_boxes = removed_boxes_by_page.get(page_index, [])
+        page_diff.replaced_old_boxes = replaced_old_by_page.get(page_index, [])
+        page_diff.replaced_new_boxes = replaced_new_by_page.get(page_index, [])
         page_diff.status = (
             "changed"
-            if (page_diff.added_boxes or page_diff.removed_boxes or page_diff.visual_boxes)
+            if (
+                page_diff.added_boxes
+                or page_diff.removed_boxes
+                or page_diff.replaced_old_boxes
+                or page_diff.replaced_new_boxes
+                or page_diff.visual_boxes
+            )
             else "unchanged"
         )
 
@@ -736,9 +754,11 @@ def _compare_pdfs(
         if page.page_index < old_doc_annot.page_count:
             old_page = old_doc_annot.load_page(page.page_index)
             add_highlights(old_page, page.removed_boxes, color=(1, 0, 0))
+            add_highlights(old_page, page.replaced_old_boxes, color=(0.2, 0.4, 1.0))
         if page.page_index < new_doc_annot.page_count:
             new_page = new_doc_annot.load_page(page.page_index)
             add_highlights(new_page, page.added_boxes, color=(0, 1, 0))
+            add_highlights(new_page, page.replaced_new_boxes, color=(0.2, 0.4, 1.0))
 
     old_doc_annot.save(annotated_old)
     new_doc_annot.save(annotated_new)
@@ -755,6 +775,8 @@ def _compare_pdfs(
             "added_boxes": p.added_boxes,
             "removed_boxes": p.removed_boxes,
             "visual_boxes": p.visual_boxes,
+            "replaced_old_boxes": p.replaced_old_boxes,
+            "replaced_new_boxes": p.replaced_new_boxes,
         }
         for p in pages
     ]

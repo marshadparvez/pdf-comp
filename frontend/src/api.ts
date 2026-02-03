@@ -6,6 +6,8 @@ export type PageDiff = {
   added_boxes: number[][];
   removed_boxes: number[][];
   visual_boxes: number[][];
+  replaced_old_boxes?: number[][];
+  replaced_new_boxes?: number[][];
 };
 
 export type CompareResponse = {
