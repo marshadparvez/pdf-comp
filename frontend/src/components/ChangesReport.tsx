@@ -11,6 +11,10 @@ export default function ChangesReport({ report, oldFileName, newFileName }: Chan
   const getReportHTML = () => {
     const totalAdded = report.pages.reduce((sum, p) => sum + p.added_boxes.length, 0);
     const totalRemoved = report.pages.reduce((sum, p) => sum + p.removed_boxes.length, 0);
+    const totalMoved = report.pages.reduce(
+      (sum, p) => sum + (p.moved_boxes_old?.length ?? 0) + (p.moved_boxes_new?.length ?? 0),
+      0
+    );
     const totalVisual = report.pages.reduce((sum, p) => sum + p.visual_boxes.length, 0);
     const changedPages = report.pages.filter(p => p.status === "changed").length;
     const similarityPct = Math.round(report.similarity_score * 100);
@@ -90,6 +94,10 @@ export default function ChangesReport({ report, oldFileName, newFileName }: Chan
         <div class="stat-value" style="color: #dc3545;">${totalRemoved}</div>
       </div>
       <div class="stat-card">
+        <div class="stat-label">Items Moved</div>
+        <div class="stat-value" style="color: #3399e6;">${totalMoved}</div>
+      </div>
+      <div class="stat-card">
         <div class="stat-label">Visual Changes</div>
         <div class="stat-value" style="color: #ffc107;">${totalVisual}</div>
       </div>
@@ -106,11 +114,15 @@ export default function ChangesReport({ report, oldFileName, newFileName }: Chan
       <div class="legend">
         <div class="legend-item">
           <div class="legend-box" style="background: #dc3545;"></div>
-          <span>Removed Content</span>
+          <span>Removed — deleted from the new version</span>
         </div>
         <div class="legend-item">
           <div class="legend-box" style="background: #28a745;"></div>
-          <span>Added Content</span>
+          <span>Added — new in the new version</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-box" style="background: #3399e6;"></div>
+          <span>Moved — same text, different place</span>
         </div>
         <div class="legend-item">
           <div class="legend-box" style="background: #ffc107;"></div>
@@ -118,8 +130,7 @@ export default function ChangesReport({ report, oldFileName, newFileName }: Chan
         </div>
       </div>
       <p style="color: #6c757d; font-size: 0.95rem;">
-        The annotated PDFs use these colors to highlight differences. Red boxes indicate content removed from the original, 
-        green boxes show newly added content, and yellow boxes mark areas with visual or formatting changes.
+        The annotated PDFs use these colors. <strong>Edited text</strong> (words changed) appears as <strong>red on the original</strong> and <strong>green on the updated</strong> PDF so you see what was removed and what replaced it. Blue is only used when the text is nearly identical and just in a different position.
       </p>
     </div>
 
@@ -132,11 +143,14 @@ export default function ChangesReport({ report, oldFileName, newFileName }: Chan
             <th>Status</th>
             <th>Added</th>
             <th>Removed</th>
+            <th>Moved</th>
             <th>Visual</th>
           </tr>
         </thead>
         <tbody>
-          ${report.pages.map(page => `
+          ${report.pages.map(page => {
+            const movedCount = (page.moved_boxes_old?.length ?? 0) + (page.moved_boxes_new?.length ?? 0);
+            return `
             <tr>
               <td><strong>Page ${page.page_index + 1}</strong></td>
               <td>
@@ -146,9 +160,11 @@ export default function ChangesReport({ report, oldFileName, newFileName }: Chan
               </td>
               <td style="color: #28a745; font-weight: 600;">+${page.added_boxes.length}</td>
               <td style="color: #dc3545; font-weight: 600;">-${page.removed_boxes.length}</td>
+              <td style="color: #3399e6; font-weight: 600;">↔${movedCount}</td>
               <td style="color: #ffc107; font-weight: 600;">~${page.visual_boxes.length}</td>
             </tr>
-          `).join('')}
+          `;
+          }).join('')}
         </tbody>
       </table>
     </div>

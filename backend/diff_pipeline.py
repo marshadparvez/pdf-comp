@@ -24,6 +24,17 @@ try:
 except Exception:  # pragma: no cover - optional dependency
     partition_pdf = None
 
+try:
+    from config import (
+        SAME_PAGE_MOVE_JACCARD_THRESHOLD,
+        SAME_PAGE_MOVE_MIN_WORDS,
+        SAME_PAGE_MOVE_SIZE_RATIO,
+    )
+except ImportError:
+    SAME_PAGE_MOVE_JACCARD_THRESHOLD = 0.95
+    SAME_PAGE_MOVE_MIN_WORDS = 3
+    SAME_PAGE_MOVE_SIZE_RATIO = 0.5
+
 logger = logging.getLogger(__name__)
 
 
@@ -33,6 +44,8 @@ class PageDiff:
     added_boxes: List[Tuple[float, float, float, float]]
     removed_boxes: List[Tuple[float, float, float, float]]
     visual_boxes: List[Tuple[float, float, float, float]]
+    moved_boxes_old: List[Tuple[float, float, float, float]]  # blue on original PDF
+    moved_boxes_new: List[Tuple[float, float, float, float]]  # blue on new PDF
     status: str
 
 
@@ -138,6 +151,113 @@ def _merge_line_boxes_by_gap(
     if current:
         merged.append(merge_boxes(current))
     return merged
+
+
+def _words_in_box(
+    words: List[WordBox], box: Tuple[float, float, float, float]
+) -> List[WordBox]:
+    """Return words whose center falls inside the given box."""
+    x0, y0, x1, y1 = box
+    result: List[WordBox] = []
+    for w in words:
+        cx = (w.bbox[0] + w.bbox[2]) / 2
+        cy = (w.bbox[1] + w.bbox[3]) / 2
+        if x0 <= cx <= x1 and y0 <= cy <= y1:
+            result.append(w)
+    return result
+
+
+def _filter_same_page_moves(
+    pages: List[PageDiff],
+    stored_old_words: Dict[int, List[WordBox]],
+    stored_new_words: Dict[int, List[WordBox]],
+    min_words: Optional[int] = None,
+    overlap_threshold: Optional[float] = None,
+) -> None:
+    """
+    Match removed (red) boxes to added (green) boxes by Jaccard similarity: |R∩A|/|R∪A|.
+    Jaccard penalizes any differing words (e.g. "checking" vs "browsing") so edited
+    content stays red+green. Only near-identical text (95%+ Jaccard) → blue (moved).
+    Cross-page moves are handled separately (exact equal runs).
+    """
+    min_words = min_words if min_words is not None else SAME_PAGE_MOVE_MIN_WORDS
+    overlap_threshold = overlap_threshold if overlap_threshold is not None else SAME_PAGE_MOVE_JACCARD_THRESHOLD
+    size_ratio_min = SAME_PAGE_MOVE_SIZE_RATIO
+    for page_diff in pages:
+        if page_diff.status in ("added_page", "removed_page"):
+            continue
+        if not page_diff.removed_boxes and not page_diff.added_boxes:
+            continue
+        page_index = page_diff.page_index
+        old_words = stored_old_words.get(page_index, [])
+        new_words = stored_new_words.get(page_index, [])
+        if not old_words or not new_words:
+            continue
+
+        removed = page_diff.removed_boxes
+        added = page_diff.added_boxes
+        removed_sets: List[frozenset] = []
+        for box in removed:
+            ws = _words_in_box(old_words, box)
+            if len(ws) >= min_words:
+                removed_sets.append(frozenset(w.text.strip().lower() for w in ws))
+            else:
+                removed_sets.append(frozenset())
+        added_sets: List[frozenset] = []
+        for box in added:
+            ws = _words_in_box(new_words, box)
+            if len(ws) >= min_words:
+                added_sets.append(frozenset(w.text.strip().lower() for w in ws))
+            else:
+                added_sets.append(frozenset())
+
+        # Use Jaccard similarity: |R ∩ A| / |R ∪ A| — penalizes any differing words
+        # (e.g. "checking" vs "browsing" in a long block reduces score more than "common/min")
+        pairs: List[Tuple[int, int, float]] = []
+        for ri, rset in enumerate(removed_sets):
+            if not rset:
+                continue
+            for ai, aset in enumerate(added_sets):
+                if not aset:
+                    continue
+                common = len(rset & aset)
+                union = len(rset | aset)
+                if union == 0 or common == 0:
+                    continue
+                jaccard = common / union
+                if jaccard < overlap_threshold:
+                    continue
+                # Size ratio: both regions must be similar length (avoid "one sentence" vs "whole paragraph")
+                size_ratio = min(len(rset), len(aset)) / max(len(rset), len(aset))
+                if size_ratio < size_ratio_min:
+                    continue
+                pairs.append((ri, ai, jaccard))
+        pairs.sort(key=lambda p: -p[2])
+
+        removed_matched: set = set()
+        added_matched: set = set()
+        for ri, ai, score in pairs:
+            if ri in removed_matched or ai in added_matched:
+                continue
+            removed_matched.add(ri)
+            added_matched.add(ai)
+
+        if removed_matched or added_matched:
+            page_diff.moved_boxes_old = [removed[i] for i in sorted(removed_matched)]
+            page_diff.moved_boxes_new = [added[i] for i in sorted(added_matched)]
+            page_diff.removed_boxes = [b for i, b in enumerate(removed) if i not in removed_matched]
+            page_diff.added_boxes = [b for i, b in enumerate(added) if i not in added_matched]
+            page_diff.status = (
+                "changed"
+                if (page_diff.added_boxes or page_diff.removed_boxes or page_diff.moved_boxes_old or page_diff.moved_boxes_new or page_diff.visual_boxes)
+                else "unchanged"
+            )
+            logger.info(
+                "Page %d: same-page move → %d blue (old), %d blue (new)",
+                page_index + 1,
+                len(page_diff.moved_boxes_old),
+                len(page_diff.moved_boxes_new),
+            )
 
 
 def _normalize_header_footer_line(text: str) -> str:
@@ -301,6 +421,7 @@ def _compare_pdfs(
     output_dir: Path,
     old_words_map: Optional[Dict[int, List[WordBox]]] = None,
     new_words_map: Optional[Dict[int, List[WordBox]]] = None,
+    use_ocr: bool = True,
 ) -> Dict:
     logger.info("Starting PDF comparison")
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -338,9 +459,9 @@ def _compare_pdfs(
             logger.info("Page %d: %s", page_index + 1, "removed" if has_old else "added")
             if has_new:
                 new_page = new_doc.load_page(page_index)
-                new_image, new_scale = render_page_image(new_page)
                 new_words = new_words_map.get(page_index) or extract_words_from_page(new_page)
-                if len(new_words) < 10:
+                if use_ocr and len(new_words) < 10:
+                    new_image, new_scale = render_page_image(new_page)
                     logger.info("Page %d: OCR fallback for new PDF (word_count=%d)", page_index + 1, len(new_words))
                     new_words = _scale_ocr_words(ocr_words_from_image(new_image), new_scale)
                 stored_new_words[page_index] = new_words
@@ -348,9 +469,9 @@ def _compare_pdfs(
                 all_new_words.extend(new_words)
             if has_old:
                 old_page = old_doc.load_page(page_index)
-                old_image, old_scale = render_page_image(old_page)
                 old_words = old_words_map.get(page_index) or extract_words_from_page(old_page)
-                if len(old_words) < 10:
+                if use_ocr and len(old_words) < 10:
+                    old_image, old_scale = render_page_image(old_page)
                     logger.info("Page %d: OCR fallback for old PDF (word_count=%d)", page_index + 1, len(old_words))
                     old_words = _scale_ocr_words(ocr_words_from_image(old_image), old_scale)
                 stored_old_words[page_index] = old_words
@@ -362,6 +483,8 @@ def _compare_pdfs(
                     added_boxes=[],
                     removed_boxes=[],
                     visual_boxes=[],
+                    moved_boxes_old=[],
+                    moved_boxes_new=[],
                     status="removed_page" if has_old else "added_page",
                 )
             )
@@ -370,16 +493,15 @@ def _compare_pdfs(
         old_page = old_doc.load_page(page_index)
         new_page = new_doc.load_page(page_index)
 
-        old_image, old_scale = render_page_image(old_page)
-        new_image, new_scale = render_page_image(new_page)
-
         old_words = old_words_map.get(page_index) or extract_words_from_page(old_page)
         new_words = new_words_map.get(page_index) or extract_words_from_page(new_page)
 
-        if len(old_words) < 10:
+        if use_ocr and len(old_words) < 10:
+            old_image, old_scale = render_page_image(old_page)
             logger.info("Page %d: OCR fallback for old PDF (word_count=%d)", page_index + 1, len(old_words))
             old_words = _scale_ocr_words(ocr_words_from_image(old_image), old_scale)
-        if len(new_words) < 10:
+        if use_ocr and len(new_words) < 10:
+            new_image, new_scale = render_page_image(new_page)
             logger.info("Page %d: OCR fallback for new PDF (word_count=%d)", page_index + 1, len(new_words))
             new_words = _scale_ocr_words(ocr_words_from_image(new_image), new_scale)
 
@@ -402,6 +524,8 @@ def _compare_pdfs(
                 added_boxes=[],
                 removed_boxes=[],
                 visual_boxes=visual_boxes,
+                moved_boxes_old=[],
+                moved_boxes_new=[],
                 status="unchanged",
             )
         )
@@ -597,6 +721,10 @@ def _compare_pdfs(
             else "unchanged"
         )
 
+    # Same-page move detection: suppress red+green when content only moved within the page
+    logger.info("Running same-page move detection")
+    _filter_same_page_moves(pages, stored_old_words, stored_new_words)
+
     # Second pass: Cross-page matching to detect moved content
     # This identifies when content moved from one page to another
     if old_words_with_page and new_words_with_page:
@@ -619,13 +747,17 @@ def _compare_pdfs(
         moved_old_word_indices: Dict[int, set] = {}  # old_page -> set of word indices that moved
         moved_new_word_indices: Dict[int, set] = {}  # new_page -> set of word indices that moved from elsewhere
         
+        n_old = len(old_words_with_page)
+        n_new = len(new_words_with_page)
         for tag, i1, i2, j1, j2 in global_matcher.get_opcodes():
-            if tag == "equal" and (i2 - i1) >= 3:  # Only consider sequences of 3+ words to avoid false matches
-                # Check if these equal sequences are on different pages
-                old_page = old_words_with_page[i1][1]
-                new_page = new_words_with_page[j1][1]
-                
-                if old_page != new_page:
+            if tag != "equal" or (i2 - i1) < 3:
+                continue
+            if i1 >= n_old or j1 >= n_new or i2 > n_old or j2 > n_new:
+                continue
+            old_page = old_words_with_page[i1][1]
+            new_page = new_words_with_page[j1][1]
+
+            if old_page != new_page:
                     # Content moved between pages - mark all words in this sequence
                     for old_idx in range(i1, i2):
                         moved_old_word_indices.setdefault(old_page, set()).add(old_idx)
@@ -652,77 +784,74 @@ def _compare_pdfs(
             old_start_idx = sum(len(stored_old_words.get(i, [])) for i in range(page_index))
             new_start_idx = sum(len(stored_new_words.get(i, [])) for i in range(page_index))
             
-            # Filter removed boxes: exclude boxes that contain mostly moved words
+            # Cross-page moved: put into blue (moved_boxes) instead of dropping
+            moved_removed: List[Tuple[float, float, float, float]] = []
             filtered_removed = []
             for removed_box in page_diff.removed_boxes:
-                # Check if this box contains words that were moved to another page
                 box_contains_moved = False
                 if old_page_words and moved_old_words:
-                    # Find all words that are within this removed box
                     words_in_box = []
                     for local_idx, word in enumerate(old_page_words):
                         global_idx = old_start_idx + local_idx
                         word_center_x = (word.bbox[0] + word.bbox[2]) / 2
                         word_center_y = (word.bbox[1] + word.bbox[3]) / 2
-                        # Check if word center is within the removed box
                         if (removed_box[0] <= word_center_x <= removed_box[2] and
                             removed_box[1] <= word_center_y <= removed_box[3]):
                             words_in_box.append((local_idx, global_idx, word))
-                    
-                    # Count how many of the words in this box are marked as moved
                     if words_in_box:
                         moved_in_box = sum(1 for _, gidx, _ in words_in_box if gidx in moved_old_words)
-                        # If >30% of words in this box are moved, filter it out
                         if moved_in_box / len(words_in_box) > 0.3:
                             box_contains_moved = True
-                
-                if not box_contains_moved:
+                if box_contains_moved:
+                    moved_removed.append(removed_box)
+                else:
                     filtered_removed.append(removed_box)
-            
-            # Filter added boxes similarly
+
+            moved_added: List[Tuple[float, float, float, float]] = []
             filtered_added = []
             for added_box in page_diff.added_boxes:
-                # Check if this box contains words that were moved from another page
                 box_contains_moved = False
                 if new_page_words and moved_new_words:
-                    # Find all words that are within this added box
                     words_in_box = []
                     for local_idx, word in enumerate(new_page_words):
                         global_idx = new_start_idx + local_idx
                         word_center_x = (word.bbox[0] + word.bbox[2]) / 2
                         word_center_y = (word.bbox[1] + word.bbox[3]) / 2
-                        # Check if word center is within the added box
                         if (added_box[0] <= word_center_x <= added_box[2] and
                             added_box[1] <= word_center_y <= added_box[3]):
                             words_in_box.append((local_idx, global_idx, word))
-                    
-                    # Count how many of the words in this box are marked as moved
                     if words_in_box:
                         moved_in_box = sum(1 for _, gidx, _ in words_in_box if gidx in moved_new_words)
-                        # If >30% of words in this box are moved, filter it out
                         if moved_in_box / len(words_in_box) > 0.3:
                             box_contains_moved = True
-                
-                if not box_contains_moved:
+                if box_contains_moved:
+                    moved_added.append(added_box)
+                else:
                     filtered_added.append(added_box)
-            
-            # Update the page diff with filtered boxes
+
             page_diff.removed_boxes = filtered_removed
             page_diff.added_boxes = filtered_added
+            page_diff.moved_boxes_old = list(page_diff.moved_boxes_old) + moved_removed
+            page_diff.moved_boxes_new = list(page_diff.moved_boxes_new) + moved_added
             
-            # Update status if boxes were filtered out
-            if (not filtered_removed and not filtered_added and 
-                page_diff.visual_boxes and 
-                page_diff.status == "changed"):
-                # If only visual changes remain, keep status as changed
-                pass
-            elif not filtered_removed and not filtered_added and not page_diff.visual_boxes:
+            # Update status
+            if (page_diff.moved_boxes_old or page_diff.moved_boxes_new or
+                page_diff.removed_boxes or page_diff.added_boxes or page_diff.visual_boxes):
+                page_diff.status = "changed"
+            else:
                 page_diff.status = "unchanged"
         logger.info("Cross-page cleanup complete")
 
-    similarity_score = 0.0
-    low_confidence = False
-    logger.info("Similarity computed: visual disabled")
+    # Compute real similarity: word-level match ratio via SequenceMatcher
+    old_tokens = [w.text for w, _ in old_words_with_page] if old_words_with_page else []
+    new_tokens = [w.text for w, _ in new_words_with_page] if new_words_with_page else []
+    if old_tokens or new_tokens:
+        matcher = SequenceMatcher(a=old_tokens, b=new_tokens)
+        similarity_score = matcher.ratio()  # 0..1
+    else:
+        similarity_score = 1.0 if not old_tokens and not new_tokens else 0.0
+    low_confidence = similarity_score < 0.3
+    logger.info("Similarity computed: %.4f (word-level)", similarity_score)
 
     job_id = uuid.uuid4().hex
     annotated_old = output_dir / f"{job_id}_old_annotated.pdf"
@@ -732,13 +861,16 @@ def _compare_pdfs(
     new_doc_annot = fitz.open(new_path)
     logger.info("Annotating PDFs")
 
+    BLUE_MOVED = (0.2, 0.45, 0.9)  # bluish for moved content
     for page in pages:
         if page.page_index < old_doc_annot.page_count:
             old_page = old_doc_annot.load_page(page.page_index)
             add_highlights(old_page, page.removed_boxes, color=(1, 0, 0))
+            add_highlights(old_page, page.moved_boxes_old, color=BLUE_MOVED)
         if page.page_index < new_doc_annot.page_count:
             new_page = new_doc_annot.load_page(page.page_index)
             add_highlights(new_page, page.added_boxes, color=(0, 1, 0))
+            add_highlights(new_page, page.moved_boxes_new, color=BLUE_MOVED)
 
     old_doc_annot.save(annotated_old)
     new_doc_annot.save(annotated_new)
@@ -755,6 +887,8 @@ def _compare_pdfs(
             "added_boxes": p.added_boxes,
             "removed_boxes": p.removed_boxes,
             "visual_boxes": p.visual_boxes,
+            "moved_boxes_old": p.moved_boxes_old,
+            "moved_boxes_new": p.moved_boxes_new,
         }
         for p in pages
     ]
@@ -770,8 +904,8 @@ def _compare_pdfs(
 
 
 def compare_pdfs_speed(old_path: Path, new_path: Path, output_dir: Path) -> Dict:
-    logger.info("Mode: speed")
-    return _compare_pdfs(old_path, new_path, output_dir)
+    logger.info("Mode: speed (OCR disabled)")
+    return _compare_pdfs(old_path, new_path, output_dir, use_ocr=False)
 
 
 def compare_pdfs_accuracy(old_path: Path, new_path: Path, output_dir: Path) -> Dict:
@@ -796,6 +930,6 @@ def compare_pdfs(old_path: Path, new_path: Path, output_dir: Path, mode: str) ->
     report = compare_pdfs_speed(old_path, new_path, output_dir)
     report["mode"] = "speed"
     report["mode_explanation"] = (
-        "Speed mode uses fast text extraction with OCR fallback for large PDFs."
+        "Speed mode uses fast text extraction only (no OCR) for quick results; use Accuracy for scanned PDFs."
     )
     return report

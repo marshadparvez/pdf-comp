@@ -1,19 +1,26 @@
 # PDF Comparison Tool
 
-A dual-pipeline PDF comparison web application that supports both speed and accuracy modes for comparing PDF documents.
+**v0.4** — A dual-pipeline PDF comparison web application that supports both speed and accuracy modes for comparing PDF documents.
 
 ## Features
 
 - **Dual Pipeline Support**:
-  - **Speed Mode**: Fast comparison using pdfplumber + OCR + OpenCV for quick processing
+  - **Speed Mode**: Fast comparison using pdfplumber; OCR only when needed. Best for large PDFs.
   - **Accuracy Mode**: Layout-aware comparison using Docling + Unstructured + OCR for better structure fidelity
 
 - **Comparison Capabilities**:
-  - Text diffs (added/removed/changed words)
+  - Text diffs: **added** (green), **removed** (red), **moved** (blue), **edited** (red on old + green on new)
+  - **Moved content**: Same text in a new position (same page or across pages) is highlighted in blue on both PDFs
+  - Same-page move detection via Jaccard similarity; cross-page move detection via exact matching
   - Visual diffs (layout/format changes)
   - Automatic OCR fallback for pages with little/no extractable text
-  - Similarity scoring with low-confidence warnings
+  - Similarity score (0–1) with low-confidence warnings
   - Annotated PDF downloads
+
+- **Frontend**:
+  - Dark mode toggle, export report (HTML), filter pages by change type (added/removed/moved)
+  - Compact legend (removed / added / moved), per-page change counts, keyboard shortcuts (arrows, Page Up/Down)
+  - Request timeout (130s) with retry on failure; clearer error messages
 
 ## Architecture
 
@@ -25,16 +32,22 @@ User -> WebUI -> API -> Router -> SpeedPipeline/AccuracyPipeline -> DiffEngine -
 
 ```
 pdf/
-├── backend/          # FastAPI backend
-│   ├── app.py       # Main API server
-│   ├── diff_pipeline.py  # Pipeline router and comparison logic
-│   ├── pdf_utils.py      # PDF utilities
-│   └── requirements.txt  # Python dependencies
-├── frontend/        # React + TypeScript frontend
+├── backend/              # FastAPI backend
+│   ├── app.py             # Main API server
+│   ├── config.py          # Tunable thresholds (env overrides)
+│   ├── diff_pipeline.py   # Pipeline router and comparison logic
+│   ├── pdf_utils.py       # PDF utilities
+│   ├── requirements.txt
+│   └── tests/
+├── docs/                  # Documentation
+│   └── HOW_COMPARISON_WORKS.md
+├── frontend/              # React + TypeScript (Vite)
 │   ├── src/
 │   │   ├── components/
 │   │   │   ├── UploadForm.tsx
-│   │   │   └── DiffReport.tsx
+│   │   │   ├── DiffReport.tsx
+│   │   │   ├── ChangesReport.tsx
+│   │   │   └── LoadingProgress.tsx
 │   │   ├── api.ts
 │   │   └── App.tsx
 │   └── package.json
@@ -100,6 +113,14 @@ npm run dev
 
 The frontend will be available at `http://localhost:5173` (or the port shown in the terminal)
 
+### Backend configuration (optional)
+
+Set environment variables to tune comparison behavior:
+
+- `PDF_DIFF_JACCARD_THRESHOLD` — Same-page move threshold 0–1 (default: 0.95). Higher = stricter (edited stays red+green).
+- `PDF_DIFF_MIN_WORDS` — Min words in a box to consider for same-page move (default: 3).
+- `PDF_DIFF_SIZE_RATIO` — Min size ratio (min/max word count) for pairing (default: 0.5).
+
 ### Frontend configuration
 
 Create `frontend/.env` (see `frontend/.env.example`) and optionally set:
@@ -108,13 +129,13 @@ Create `frontend/.env` (see `frontend/.env.example`) and optionally set:
 
 ## Usage
 
-1. Open the web application in your browser
-2. Upload two PDF files (old and new versions)
+1. Open the web application in your browser.
+2. Upload two PDF files (old and new versions).
 3. Select a comparison mode:
    - **Speed**: Fast comparison for large PDFs. Best for quick changes; may miss complex layout shifts.
    - **Accuracy**: Deeper layout-aware comparison. Slower but more reliable for complex or mixed PDFs.
-4. Click "Compare" to generate the diff report
-5. View the results and download annotated PDFs
+4. Click **Compare** to generate the diff report.
+5. View the results (per-page stats, filter by change type), use the legend (red = removed, green = added, blue = moved), and download annotated PDFs or export the report as HTML.
 
 ## API Endpoints
 
@@ -133,10 +154,10 @@ Create `frontend/.env` (see `frontend/.env.example`) and optionally set:
 
 For very large files (e.g., 800+ pages), Speed mode is recommended by default.
 
-## Recent improvements
+## Changelog / v0.4
 
-- **Frontend**: Configurable API base URL (`VITE_API_BASE`), clearer error messages from the API, similarity shown as %, highlight legend (removed/added/visual), "Compare again" button, selected filenames and mode explanations in the upload form.
-- **Backend**: PDF-only and `mode` validation, 100 MB max file size, upload directory cleanup after each compare, structured logging of job_id, mode, similarity, and low_confidence.
+- **Backend**: Moved content (blue) on both PDFs for same-page (Jaccard) and cross-page moves; tunable thresholds via `config.py` and env vars; real similarity score (SequenceMatcher); bounds checks for differing page counts; Speed mode skips OCR when not needed to avoid hangs.
+- **Frontend**: Moved-content legend and per-page stats; filter pages by change type (added/removed/moved); dark mode; export report (HTML); keyboard shortcuts (arrows, Page Up/Down); 130s request timeout with retry; accessibility (aria-labels); compact legend and loading state with mode.
 
 ## License
 

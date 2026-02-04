@@ -7,14 +7,42 @@ type DiffReportProps = {
   onCompareAgain?: () => void;
   oldFileName: string;
   newFileName: string;
+  darkMode?: boolean;
 };
 
-export default function DiffReport({ report, onCompareAgain, oldFileName, newFileName }: DiffReportProps) {
+export default function DiffReport({ report, onCompareAgain, oldFileName, newFileName, darkMode = false }: DiffReportProps) {
   const base = API_BASE.replace(/\/$/, "");
   const similarityPct = Math.round(report.similarity_score * 100);
   const [selectedPage, setSelectedPage] = useState<number | null>(null);
+  const [pageFilter, setPageFilter] = useState<string>("all");
   const oldPdfRef = useRef<HTMLIFrameElement>(null);
   const newPdfRef = useRef<HTMLIFrameElement>(null);
+
+  const filteredPages = pageFilter === "all" ? report.pages :
+    pageFilter === "changed" ? report.pages.filter(p => p.status === "changed") :
+    pageFilter === "unchanged" ? report.pages.filter(p => p.status === "unchanged") :
+    pageFilter === "has_removed" ? report.pages.filter(p => p.removed_boxes.length > 0) :
+    pageFilter === "has_added" ? report.pages.filter(p => p.added_boxes.length > 0) :
+    pageFilter === "has_moved" ? report.pages.filter(p => (p.moved_boxes_old?.length ?? 0) + (p.moved_boxes_new?.length ?? 0) > 0) :
+    report.pages;
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+      const maxPage = report.pages.length - 1;
+      if (maxPage < 0) return;
+      const cur = selectedPage ?? 0;
+      if (e.key === "ArrowRight" || e.key === "PageDown") {
+        e.preventDefault();
+        setSelectedPage(Math.min(cur + 1, maxPage));
+      } else if (e.key === "ArrowLeft" || e.key === "PageUp") {
+        e.preventDefault();
+        setSelectedPage(Math.max(cur - 1, 0));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [report.pages.length, selectedPage]);
 
   // Calculate statistics
   const totalAdded = report.pages.reduce((sum, p) => sum + p.added_boxes.length, 0);
@@ -256,15 +284,65 @@ export default function DiffReport({ report, onCompareAgain, oldFileName, newFil
         </div>
       </div>
 
-      {/* Highlight Colors Guide removed per request */}
-
-      {/* Download Buttons removed per request */}
+      {/* How to read the highlights */}
+      <div
+        style={{
+          padding: "20px 24px",
+          background: "#f8fafc",
+          borderRadius: "12px",
+          border: "1px solid #e2e8f0",
+          marginBottom: "24px",
+        }}
+      >
+        <h3 style={{ margin: "0 0 12px 0", fontSize: "1.1rem", fontWeight: 700, color: "#334155" }}>
+          How to read the highlights
+        </h3>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "16px 24px", alignItems: "flex-start" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <div style={{ width: 20, height: 20, borderRadius: 4, background: "#dc3545" }} />
+            <span style={{ fontSize: "0.9rem", color: "#475569" }}><strong>Removed</strong> — deleted from the new version</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <div style={{ width: 20, height: 20, borderRadius: 4, background: "#28a745" }} />
+            <span style={{ fontSize: "0.9rem", color: "#475569" }}><strong>Added</strong> — new in the new version</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <div style={{ width: 20, height: 20, borderRadius: 4, background: "#3399e6" }} />
+            <span style={{ fontSize: "0.9rem", color: "#475569" }}><strong>Moved</strong> — same text, different place (same or other page)</span>
+          </div>
+        </div>
+        <p style={{ margin: "12px 0 0 0", fontSize: "0.85rem", color: "#64748b", lineHeight: 1.5 }}>
+          <strong>Edited text</strong> (words changed, e.g. &quot;checking&quot; → &quot;browsing&quot;) is shown as <strong>red on the original</strong> and <strong>green on the updated</strong> PDF — so you see exactly what was removed and what replaced it.
+        </p>
+      </div>
 
       {/* Page Summary */}
       <div style={{ display: "grid", gap: "20px" }}>
-        <h3 style={{ margin: 0, fontSize: "1.8rem", fontWeight: 800, color: "#212529", letterSpacing: "-0.5px" }}>
-          📑 Page-by-Page Analysis
-        </h3>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "16px" }}>
+          <h3 style={{ margin: 0, fontSize: "1.8rem", fontWeight: 800, color: darkMode ? "#f9fafb" : "#212529", letterSpacing: "-0.5px" }}>
+            📑 Page-by-Page Analysis
+          </h3>
+          <select
+            value={pageFilter}
+            onChange={(e) => setPageFilter(e.target.value)}
+            style={{
+              padding: "8px 16px",
+              borderRadius: "8px",
+              border: `2px solid ${darkMode ? "#4b5563" : "#e5e7eb"}`,
+              background: darkMode ? "#374151" : "white",
+              color: darkMode ? "#f9fafb" : "#111827",
+              fontWeight: 600,
+              fontSize: "0.9rem",
+            }}
+          >
+            <option value="all">All pages</option>
+            <option value="changed">Changed only</option>
+            <option value="unchanged">Unchanged only</option>
+            <option value="has_removed">Has removed</option>
+            <option value="has_added">Has added</option>
+            <option value="has_moved">Has moved</option>
+          </select>
+        </div>
         
         <div
           style={{
@@ -275,7 +353,7 @@ export default function DiffReport({ report, onCompareAgain, oldFileName, newFil
             padding: "4px",
           }}
         >
-          {report.pages.map((page, idx) => (
+          {filteredPages.map((page, idx) => (
             <div
               key={page.page_index}
               onClick={() => handlePageClick(page.page_index)}
@@ -361,36 +439,16 @@ export default function DiffReport({ report, onCompareAgain, oldFileName, newFil
               </div>
               <div style={{ display: "flex", gap: "20px", fontSize: "0.95rem", flexWrap: "wrap" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <div style={{ 
-                    width: "32px", 
-                    height: "32px", 
-                    background: "rgba(40, 167, 69, 0.1)", 
-                    borderRadius: "8px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontWeight: 700,
-                    color: "#28a745",
-                  }}>
-                    +{page.added_boxes.length}
-                  </div>
+                  <div style={{ width: "32px", height: "32px", background: "rgba(40, 167, 69, 0.1)", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, color: "#28a745" }}>+{page.added_boxes.length}</div>
                   <span style={{ color: "#6c757d", fontWeight: 600 }}>Added</span>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <div style={{ 
-                    width: "32px", 
-                    height: "32px", 
-                    background: "rgba(220, 53, 69, 0.1)", 
-                    borderRadius: "8px",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    fontWeight: 700,
-                    color: "#dc3545",
-                  }}>
-                    {page.removed_boxes.length}
-                  </div>
+                  <div style={{ width: "32px", height: "32px", background: "rgba(220, 53, 69, 0.1)", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, color: "#dc3545" }}>{page.removed_boxes.length}</div>
                   <span style={{ color: "#6c757d", fontWeight: 600 }}>Removed</span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <div style={{ width: "32px", height: "32px", background: "rgba(51, 153, 230, 0.1)", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, color: "#3399e6" }}>↔{(page.moved_boxes_old?.length ?? 0) + (page.moved_boxes_new?.length ?? 0)}</div>
+                  <span style={{ color: "#6c757d", fontWeight: 600 }}>Moved</span>
                 </div>
               </div>
             </div>
@@ -405,9 +463,20 @@ export default function DiffReport({ report, onCompareAgain, oldFileName, newFil
         </h3>
         {selectedPage !== null && (
           <div style={{ padding: "12px 16px", background: "#eff6ff", borderRadius: "8px", fontSize: "0.9rem", color: "#1e40af", marginBottom: "8px" }}>
-            📍 Viewing Page {selectedPage + 1} — Click any page above to jump to it
+            📍 Viewing Page {selectedPage + 1} — Click any page above or use ← → / Page Up / Page Down to navigate
           </div>
         )}
+        <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", marginBottom: "12px", padding: "8px 0" }}>
+          <span style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "0.85rem" }}>
+            <span style={{ width: 12, height: 12, borderRadius: 2, background: "#dc3545" }} /> Removed
+          </span>
+          <span style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "0.85rem" }}>
+            <span style={{ width: 12, height: 12, borderRadius: 2, background: "#28a745" }} /> Added
+          </span>
+          <span style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "0.85rem" }}>
+            <span style={{ width: 12, height: 12, borderRadius: 2, background: "#3399e6" }} /> Moved
+          </span>
+        </div>
         <div
           style={{
             display: "grid",

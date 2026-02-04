@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import shutil
 import uuid
@@ -20,6 +21,7 @@ RESULTS_DIR = BASE_DIR / "results"
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
 MAX_PDF_BYTES = 100 * 1024 * 1024  # 100 MB
+COMPARE_TIMEOUT_SECONDS = 120  # 2 min; return 504 instead of hanging
 
 app = FastAPI()
 app.add_middleware(
@@ -77,7 +79,21 @@ async def compare(
                     f"{label.capitalize()} PDF exceeds max size ({(MAX_PDF_BYTES // (1024 * 1024))} MB).",
                 )
 
-        report = compare_pdfs(old_path, new_path, RESULTS_DIR, normalized_mode)
+        loop = asyncio.get_event_loop()
+        try:
+            report = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,
+                    lambda: compare_pdfs(old_path, new_path, RESULTS_DIR, normalized_mode),
+                ),
+                timeout=COMPARE_TIMEOUT_SECONDS,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("compare timed out after %s seconds", COMPARE_TIMEOUT_SECONDS)
+            raise HTTPException(
+                504,
+                f"Comparison timed out after {COMPARE_TIMEOUT_SECONDS} seconds. Try Speed mode and smaller/fewer pages.",
+            )
 
         logger.info(
             "compare job_id=%s mode=%s similarity=%.4f low_confidence=%s",

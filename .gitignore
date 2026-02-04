@@ -62,7 +62,7 @@ backend/results/
 backend/uploads/
 *.pdf
 
-#Other Folders
+# Other Folders
 non_git/
 
 # Logs

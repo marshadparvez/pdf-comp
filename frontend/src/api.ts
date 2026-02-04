@@ -6,6 +6,8 @@ export type PageDiff = {
   added_boxes: number[][];
   removed_boxes: number[][];
   visual_boxes: number[][];
+  moved_boxes_old?: number[][];
+  moved_boxes_new?: number[][];
 };
 
 export type CompareResponse = {
@@ -22,6 +24,7 @@ export type CompareResponse = {
 };
 
 const API_BASE = import.meta.env.VITE_API_BASE ?? "http://localhost:8010";
+const COMPARE_REQUEST_TIMEOUT_MS = 130_000; // Slightly over backend 120s
 
 export async function comparePdfs(
   oldFile: File,
@@ -33,10 +36,15 @@ export async function comparePdfs(
   formData.append("new_pdf", newFile);
   formData.append("mode", mode);
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), COMPARE_REQUEST_TIMEOUT_MS);
+
   const response = await fetch(`${API_BASE}/compare`, {
     method: "POST",
     body: formData,
+    signal: controller.signal,
   });
+  clearTimeout(timeoutId);
 
   if (!response.ok) {
     const body = await response.json().catch(() => ({}));

@@ -3,6 +3,7 @@ import { useState } from "react";
 type UploadFormProps = {
   onSubmit: (oldFile: File, newFile: File, mode: "speed" | "accuracy") => void;
   isLoading: boolean;
+  darkMode?: boolean;
 };
 
 const MODE_HELP: Record<"speed" | "accuracy", string> = {
@@ -16,7 +17,7 @@ const formatFileSize = (bytes: number): string => {
   return (bytes / (1024 * 1024)).toFixed(1) + " MB";
 };
 
-export default function UploadForm({ onSubmit, isLoading }: UploadFormProps) {
+export default function UploadForm({ onSubmit, isLoading, darkMode = false }: UploadFormProps) {
   const [oldFile, setOldFile] = useState<File | null>(null);
   const [newFile, setNewFile] = useState<File | null>(null);
   const [mode, setMode] = useState<"speed" | "accuracy">("speed");

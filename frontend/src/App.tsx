@@ -11,11 +11,14 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [showContent, setShowContent] = useState(true);
   const [fileNames, setFileNames] = useState<{ old: string; new: string }>({ old: "", new: "" });
+  const [loadingMode, setLoadingMode] = useState<"speed" | "accuracy">("speed");
+  const [darkMode, setDarkMode] = useState(false);
 
   const handleSubmit = async (oldFile: File, newFile: File, mode: "speed" | "accuracy") => {
     setShowContent(false);
     setLoadingComplete(false);
     setFileNames({ old: oldFile.name, new: newFile.name });
+    setLoadingMode(mode);
     setTimeout(() => {
       setIsLoading(true);
       setError(null);
@@ -32,7 +35,13 @@ export default function App() {
         setIsLoading(false);
       }, 800);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
+      let message = "Something went wrong";
+      if (err instanceof Error) {
+        message = err.name === "AbortError"
+          ? "Request timed out. Try smaller PDFs or Speed mode."
+          : err.message;
+      }
+      setError(message);
       setIsLoading(false);
       setLoadingComplete(false);
     }
@@ -51,7 +60,7 @@ export default function App() {
     <div
       style={{
         minHeight: "100vh",
-        background: "#f9fafb",
+        background: darkMode ? "#1f2937" : "#f9fafb",
         position: "relative",
       }}
     >
@@ -63,25 +72,33 @@ export default function App() {
         }}
       >
         {/* Header */}
-        <div
-          style={{
-            marginBottom: "40px",
-          }}
-        >
-          <h1
+        <div style={{ marginBottom: "40px", display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "16px" }}>
+          <div>
+            <h1 style={{ margin: "0 0 8px 0", fontSize: "2.5rem", fontWeight: 700, color: darkMode ? "#f9fafb" : "#111827", letterSpacing: "-0.5px" }}>
+              PDF Comparison
+            </h1>
+            <p style={{ margin: 0, color: darkMode ? "#9ca3af" : "#6b7280", fontSize: "1rem", fontWeight: 400 }}>
+              Find and visualize changes between document versions
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => setDarkMode((d) => !d)}
+            title={darkMode ? "Light mode" : "Dark mode"}
+            aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"}
             style={{
-              margin: "0 0 8px 0",
-              fontSize: "2.5rem",
-              fontWeight: 700,
-              color: "#111827",
-              letterSpacing: "-0.5px",
+              padding: "8px 16px",
+              background: darkMode ? "#374151" : "#e5e7eb",
+              color: darkMode ? "#f9fafb" : "#374151",
+              border: "1px solid #9ca3af",
+              borderRadius: "8px",
+              fontWeight: 600,
+              cursor: "pointer",
+              fontSize: "0.9rem",
             }}
           >
-            PDF Comparison
-          </h1>
-          <p style={{ margin: 0, color: "#6b7280", fontSize: "1rem", fontWeight: 400 }}>
-            Find and visualize changes between document versions
-          </p>
+            {darkMode ? "☀️ Light" : "🌙 Dark"}
+          </button>
         </div>
 
         {/* Error Alert */}
@@ -96,14 +113,35 @@ export default function App() {
               color: "#dc2626",
               display: "flex",
               alignItems: "center",
+              justifyContent: "space-between",
+              flexWrap: "wrap",
               gap: "12px",
             }}
           >
-            <span style={{ fontSize: "1.2em" }}>⚠️</span>
-            <div>
-              <div style={{ fontWeight: 600, fontSize: "0.95rem", marginBottom: "2px" }}>Error</div>
-              <div style={{ fontWeight: 400, fontSize: "0.9rem" }}>{error}</div>
+            <div style={{ display: "flex", alignItems: "center", gap: "12px", flex: 1 }}>
+              <span style={{ fontSize: "1.2em" }}>⚠️</span>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: "0.95rem", marginBottom: "2px" }}>Error</div>
+                <div style={{ fontWeight: 400, fontSize: "0.9rem" }}>{error}</div>
+              </div>
             </div>
+            <button
+              type="button"
+              onClick={() => { setError(null); setReport(null); }}
+              aria-label="Dismiss error and try again"
+              style={{
+                padding: "8px 16px",
+                background: "#dc2626",
+                color: "white",
+                border: "none",
+                borderRadius: "8px",
+                fontWeight: 600,
+                cursor: "pointer",
+                fontSize: "0.9rem",
+              }}
+            >
+              Try Again
+            </button>
           </div>
         )}
 
@@ -111,29 +149,29 @@ export default function App() {
         {!isLoading && !report && (
           <div
             style={{
-              background: "white",
+              background: darkMode ? "#374151" : "white",
               borderRadius: "12px",
-              border: "1px solid #e5e7eb",
+              border: `1px solid ${darkMode ? "#4b5563" : "#e5e7eb"}`,
               padding: "40px",
               boxShadow: "0 1px 3px rgba(0, 0, 0, 0.1)",
             }}
           >
-            <UploadForm onSubmit={handleSubmit} isLoading={isLoading} />
+            <UploadForm onSubmit={handleSubmit} isLoading={isLoading} darkMode={darkMode} />
           </div>
         )}
 
         {isLoading && (
           <div
             style={{
-              background: "white",
+              background: darkMode ? "#374151" : "white",
               borderRadius: "12px",
-              border: "1px solid #e5e7eb",
+              border: `1px solid ${darkMode ? "#4b5563" : "#e5e7eb"}`,
               padding: "40px",
               boxShadow: "0 1px 3px rgba(0, 0, 0, 0.1)",
             }}
           >
             <LoadingProgress 
-              message="Analyzing PDFs and computing differences..." 
+              message={`Running ${loadingMode === "speed" ? "Speed" : "Accuracy"} mode — analyzing PDFs...`}
               isComplete={loadingComplete}
             />
           </div>
@@ -142,9 +180,9 @@ export default function App() {
         {report && (
           <div
             style={{
-              background: "white",
+              background: darkMode ? "#374151" : "white",
               borderRadius: "12px",
-              border: "1px solid #e5e7eb",
+              border: `1px solid ${darkMode ? "#4b5563" : "#e5e7eb"}`,
               padding: "40px",
               boxShadow: "0 1px 3px rgba(0, 0, 0, 0.1)",
             }}
@@ -154,6 +192,7 @@ export default function App() {
               onCompareAgain={handleCompareAgain}
               oldFileName={fileNames.old}
               newFileName={fileNames.new}
+              darkMode={darkMode}
             />
           </div>
         )}
