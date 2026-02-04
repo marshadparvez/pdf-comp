@@ -8,14 +8,14 @@ Both modes use **the same comparison algorithm**. The only difference is **how t
 
 | Step | Speed | Accuracy |
 |------|--------|----------|
-| **Per-page words** | **PyMuPDF only** (`extract_words_from_page`). Fast, no rendering. | **Unstructured** first (`partition_pdf` with hi_res strategy). Layout-aware, better for complex PDFs. |
-| **Low-text pages** (< 10 words) | **No OCR.** Uses whatever PyMuPDF found (can be empty). | **OCR fallback:** render page to image → Tesseract → word boxes. Slower but works for scanned pages. |
+| **Per-page words** | **pdfplumber** when installed (v0.5), else **PyMuPDF**. Fast, no rendering. Better on tables/columns with pdfplumber. | **Unstructured** first (`partition_pdf` with hi_res strategy). Layout-aware, better for complex PDFs. Both PDFs extracted **in parallel** (v0.5). |
+| **Low-text pages** (< 10 words) | **No OCR.** Uses whatever was extracted (can be empty). | **OCR fallback:** render page to image → Tesseract → word boxes. Slower but works for scanned pages. |
 | **When to use** | Normal digital PDFs, quick results. | Scanned PDFs, complex layouts, when you need best text recovery. |
 
 So:
 
-- **Speed:** `compare_pdfs_speed` → `_compare_pdfs(..., use_ocr=False)`. No Unstructured, no rendering, no Tesseract. Words = PyMuPDF only.
-- **Accuracy:** `compare_pdfs_accuracy` → runs Unstructured on both PDFs to get `old_words_map` / `new_words_map`, then `_compare_pdfs(..., old_words_map, new_words_map)` with `use_ocr=True` (default). For any page with < 10 words it also runs render + OCR.
+- **Speed:** `compare_pdfs_speed` → pdfplumber (or PyMuPDF) for both PDFs → `_compare_pdfs(..., use_ocr=False)`. No Unstructured, no OCR.
+- **Accuracy:** `compare_pdfs_accuracy` → runs Unstructured on **both** PDFs **in parallel** → `_compare_pdfs(..., old_words_map, new_words_map)` with `use_ocr=True`. For any page with < 10 words it also runs render + OCR.
 
 Everything below runs the same in both modes.
 

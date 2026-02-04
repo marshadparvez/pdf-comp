@@ -16,6 +16,7 @@ export type CompareResponse = {
   mode_explanation: string;
   similarity_score: number;
   low_confidence: boolean;
+  low_confidence_pages?: number[];
   pages: PageDiff[];
   downloads: {
     annotated_old: string;

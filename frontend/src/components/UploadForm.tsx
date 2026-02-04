@@ -65,7 +65,7 @@ export default function UploadForm({ onSubmit, isLoading, darkMode = false }: Up
 
     return (
       <div style={{ display: "grid", gap: "12px" }}>
-        <label style={{ fontWeight: 700, color: "#212529", fontSize: "1rem", display: "flex", alignItems: "center", gap: "8px" }}>
+        <label style={{ fontWeight: 700, color: darkMode ? "#f9fafb" : "#212529", fontSize: "1rem", display: "flex", alignItems: "center", gap: "8px" }}>
           <span style={{ 
             width: "8px", 
             height: "8px", 
@@ -223,9 +223,9 @@ export default function UploadForm({ onSubmit, isLoading, darkMode = false }: Up
               onClick={() => setMode(m)}
               style={{
                 padding: "20px",
-                border: `2px solid ${mode === m ? "#3b82f6" : "#e5e7eb"}`,
+                border: `2px solid ${mode === m ? "#3b82f6" : darkMode ? "#4b5563" : "#e5e7eb"}`,
                 borderRadius: "8px",
-                background: mode === m ? "#eff6ff" : "white",
+                background: mode === m ? "#eff6ff" : darkMode ? "#374151" : "white",
                 cursor: "pointer",
                 transition: "all 0.2s",
                 boxShadow: mode === m ? "0 0 0 3px rgba(59, 130, 246, 0.1)" : "none",
@@ -235,13 +235,13 @@ export default function UploadForm({ onSubmit, isLoading, darkMode = false }: Up
               onMouseEnter={(e) => {
                 if (mode !== m) {
                   e.currentTarget.style.borderColor = "#3b82f6";
-                  e.currentTarget.style.background = "#f9fafb";
+                  e.currentTarget.style.background = darkMode ? "#4b5563" : "#f9fafb";
                 }
               }}
               onMouseLeave={(e) => {
                 if (mode !== m) {
-                  e.currentTarget.style.borderColor = "#e5e7eb";
-                  e.currentTarget.style.background = "white";
+                  e.currentTarget.style.borderColor = darkMode ? "#4b5563" : "#e5e7eb";
+                  e.currentTarget.style.background = darkMode ? "#374151" : "white";
                 }
               }}
             >
@@ -269,10 +269,10 @@ export default function UploadForm({ onSubmit, isLoading, darkMode = false }: Up
               <div style={{ fontSize: "32px", marginBottom: "8px" }}>
                 {m === "speed" ? "⚡" : "🎯"}
               </div>
-              <div style={{ fontWeight: 700, color: "#212529", fontSize: "1.1rem", marginBottom: "4px" }}>
+              <div style={{ fontWeight: 700, color: darkMode ? "#f9fafb" : "#212529", fontSize: "1.1rem", marginBottom: "4px" }}>
                 {m === "speed" ? "Speed" : "Accuracy"}
               </div>
-              <div style={{ fontSize: "0.85rem", color: "#6c757d", lineHeight: "1.5" }}>
+              <div style={{ fontSize: "0.85rem", color: darkMode ? "#9ca3af" : "#6c757d", lineHeight: "1.5" }}>
                 {MODE_HELP[m]}
               </div>
             </div>
@@ -319,7 +319,7 @@ export default function UploadForm({ onSubmit, isLoading, darkMode = false }: Up
             {isLoading ? "⏳" : "🚀"}
           </span>
           <span>
-            {isLoading ? "Comparing…" : "Start Comparison"}
+            {isLoading ? "Comparing…" : `Compare (${mode === "speed" ? "Speed" : "Accuracy"})`}
           </span>
         </span>
       </button>

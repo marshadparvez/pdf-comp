@@ -79,8 +79,42 @@ export default function DiffReport({ report, onCompareAgain, oldFileName, newFil
     }, 500);
   };
 
+  const lowConfidencePages = report.low_confidence_pages ?? [];
+  const lowConfidencePageList = lowConfidencePages.length > 0
+    ? lowConfidencePages.map((p) => p + 1).join(", ")
+    : "";
+
   return (
     <section style={{ display: "grid", gap: "40px" }}>
+      {/* Low-confidence warning */}
+      {report.low_confidence && (
+        <div
+          role="alert"
+          aria-live="polite"
+          style={{
+            padding: "16px 20px",
+            background: darkMode ? "rgba(245, 158, 11, 0.15)" : "rgba(245, 158, 11, 0.12)",
+            border: `2px solid ${darkMode ? "#f59e0b" : "#d97706"}`,
+            borderRadius: "12px",
+            color: darkMode ? "#fcd34d" : "#92400e",
+            fontSize: "0.95rem",
+            lineHeight: 1.5,
+          }}
+        >
+          <strong style={{ display: "block", marginBottom: "6px" }}>
+            ⚠️ Lower confidence comparison
+          </strong>
+          <p style={{ margin: 0 }}>
+            Some pages had very little extractable text (e.g. images or scans). The comparison may be incomplete or less reliable on those pages.
+          </p>
+          {lowConfidencePageList && (
+            <p style={{ margin: "8px 0 0 0", fontSize: "0.9rem", opacity: 0.95 }}>
+              Affected pages: {lowConfidencePageList}
+            </p>
+          )}
+        </div>
+      )}
+
       {/* Header with Stats */}
       <div>
         <div
@@ -105,11 +139,11 @@ export default function DiffReport({ report, onCompareAgain, oldFileName, newFil
             >
               Comparison Results
             </h2>
-            <div style={{ marginTop: "12px", padding: "12px 16px", background: "#f3f4f6", borderRadius: "8px", fontSize: "0.9rem" }}>
+            <div style={{ marginTop: "12px", padding: "12px 16px", background: darkMode ? "#4b5563" : "#f3f4f6", borderRadius: "8px", fontSize: "0.9rem" }}>
               <div style={{ marginBottom: "8px" }}>
-                <strong style={{ color: "#111827" }}>Mode:</strong> <span style={{ color: "#3b82f6", fontWeight: 600 }}>{report.mode === "speed" ? "Speed" : "Accuracy"}</span>
+                <strong style={{ color: darkMode ? "#f9fafb" : "#111827" }}>Mode:</strong> <span style={{ color: "#3b82f6", fontWeight: 600 }}>{report.mode === "speed" ? "Speed" : "Accuracy"}</span>
               </div>
-              <div style={{ color: "#6b7280", lineHeight: "1.5" }}>
+              <div style={{ color: darkMode ? "#9ca3af" : "#6b7280", lineHeight: "1.5" }}>
                 {report.mode === "speed" ? (
                   <>
                     <strong>Speed mode</strong> uses fast text extraction (pdfplumber) with OCR fallback. 
@@ -162,26 +196,28 @@ export default function DiffReport({ report, onCompareAgain, oldFileName, newFil
         <div
           style={{
             padding: "32px",
-            background: `linear-gradient(135deg, ${similarityPct >= 80 ? "rgba(40, 167, 69, 0.05)" : similarityPct >= 50 ? "rgba(255, 193, 7, 0.05)" : "rgba(220, 53, 69, 0.05)"}, white)`,
+            background: darkMode
+              ? `linear-gradient(135deg, ${similarityPct >= 80 ? "rgba(40, 167, 69, 0.15)" : similarityPct >= 50 ? "rgba(255, 193, 7, 0.15)" : "rgba(220, 53, 69, 0.15)"}, #374151)`
+              : `linear-gradient(135deg, ${similarityPct >= 80 ? "rgba(40, 167, 69, 0.05)" : similarityPct >= 50 ? "rgba(255, 193, 7, 0.05)" : "rgba(220, 53, 69, 0.05)"}, white)`,
             border: `2px solid ${similarityPct >= 80 ? "#28a745" : similarityPct >= 50 ? "#ffc107" : "#dc3545"}`,
             borderRadius: "16px",
             position: "relative",
             overflow: "hidden",
-            boxShadow: "0 8px 24px rgba(0, 0, 0, 0.08)",
+            boxShadow: darkMode ? "0 8px 24px rgba(0, 0, 0, 0.3)" : "0 8px 24px rgba(0, 0, 0, 0.08)",
             marginBottom: "24px",
           }}
         >
           <div style={{ position: "relative", zIndex: 1 }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "20px" }}>
               <div>
-                <div style={{ fontSize: "0.9rem", fontWeight: 600, color: "#6c757d", marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                <div style={{ fontSize: "0.9rem", fontWeight: 600, color: darkMode ? "#9ca3af" : "#6c757d", marginBottom: "8px", textTransform: "uppercase", letterSpacing: "0.5px" }}>
                   Document Similarity
                 </div>
                 <div style={{ display: "flex", alignItems: "baseline", gap: "12px" }}>
                   <span style={{ fontSize: "4rem", fontWeight: 800, color: similarityPct >= 80 ? "#28a745" : similarityPct >= 50 ? "#ffc107" : "#dc3545", lineHeight: 1 }}>
                     {similarityPct}%
                   </span>
-                  <span style={{ fontSize: "2rem", color: "#adb5bd" }}>
+                  <span style={{ fontSize: "2rem", color: darkMode ? "#9ca3af" : "#adb5bd" }}>
                     {similarityPct >= 80 ? "✅" : similarityPct >= 50 ? "⚠️" : "❌"}
                   </span>
                 </div>
@@ -252,8 +288,8 @@ export default function DiffReport({ report, onCompareAgain, oldFileName, newFil
               key={i}
               style={{
                 padding: "20px",
-                background: "white",
-                border: "2px solid #f1f3f5",
+                background: darkMode ? "#4b5563" : "white",
+                border: `2px solid ${darkMode ? "#6b7280" : "#f1f3f5"}`,
                 borderRadius: "12px",
                 transition: "all 0.3s cubic-bezier(0.4, 0, 0.2, 1)",
                 animation: `fadeInUp 0.5s ease-out ${i * 0.1}s backwards`,
@@ -265,14 +301,14 @@ export default function DiffReport({ report, onCompareAgain, oldFileName, newFil
                 e.currentTarget.style.boxShadow = `0 8px 24px ${stat.color}20`;
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.borderColor = "#f1f3f5";
+                e.currentTarget.style.borderColor = darkMode ? "#6b7280" : "#f1f3f5";
                 e.currentTarget.style.transform = "translateY(0)";
                 e.currentTarget.style.boxShadow = "none";
               }}
             >
               <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "8px" }}>
                 <span style={{ fontSize: "2em" }}>{stat.icon}</span>
-                <div style={{ fontSize: "0.85rem", fontWeight: 600, color: "#868e96", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+                <div style={{ fontSize: "0.85rem", fontWeight: 600, color: darkMode ? "#9ca3af" : "#868e96", textTransform: "uppercase", letterSpacing: "0.5px" }}>
                   {stat.label}
                 </div>
               </div>
@@ -288,31 +324,34 @@ export default function DiffReport({ report, onCompareAgain, oldFileName, newFil
       <div
         style={{
           padding: "20px 24px",
-          background: "#f8fafc",
+          background: darkMode ? "#4b5563" : "#f8fafc",
           borderRadius: "12px",
-          border: "1px solid #e2e8f0",
+          border: `1px solid ${darkMode ? "#6b7280" : "#e2e8f0"}`,
           marginBottom: "24px",
         }}
       >
-        <h3 style={{ margin: "0 0 12px 0", fontSize: "1.1rem", fontWeight: 700, color: "#334155" }}>
+        <h3 style={{ margin: "0 0 12px 0", fontSize: "1.1rem", fontWeight: 700, color: darkMode ? "#e5e7eb" : "#334155" }}>
           How to read the highlights
         </h3>
         <div style={{ display: "flex", flexWrap: "wrap", gap: "16px 24px", alignItems: "flex-start" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <div style={{ width: 20, height: 20, borderRadius: 4, background: "#dc3545" }} />
-            <span style={{ fontSize: "0.9rem", color: "#475569" }}><strong>Removed</strong> — deleted from the new version</span>
+            <span style={{ fontSize: "0.9rem", color: darkMode ? "#d1d5db" : "#475569" }}><strong>Removed</strong> — deleted from the new version</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <div style={{ width: 20, height: 20, borderRadius: 4, background: "#28a745" }} />
-            <span style={{ fontSize: "0.9rem", color: "#475569" }}><strong>Added</strong> — new in the new version</span>
+            <span style={{ fontSize: "0.9rem", color: darkMode ? "#d1d5db" : "#475569" }}><strong>Added</strong> — new in the new version</span>
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <div style={{ width: 20, height: 20, borderRadius: 4, background: "#3399e6" }} />
-            <span style={{ fontSize: "0.9rem", color: "#475569" }}><strong>Moved</strong> — same text, different place (same or other page)</span>
+            <span style={{ fontSize: "0.9rem", color: darkMode ? "#d1d5db" : "#475569" }}><strong>Moved</strong> — same text, different place (same or other page)</span>
           </div>
         </div>
-        <p style={{ margin: "12px 0 0 0", fontSize: "0.85rem", color: "#64748b", lineHeight: 1.5 }}>
+        <p style={{ margin: "12px 0 0 0", fontSize: "0.85rem", color: darkMode ? "#9ca3af" : "#64748b", lineHeight: 1.5 }}>
           <strong>Edited text</strong> (words changed, e.g. &quot;checking&quot; → &quot;browsing&quot;) is shown as <strong>red on the original</strong> and <strong>green on the updated</strong> PDF — so you see exactly what was removed and what replaced it.
+        </p>
+        <p style={{ margin: "12px 0 0 0", fontSize: "0.8rem", color: darkMode ? "#6b7280" : "#94a3b8" }}>
+          ⌨️ <strong>Keyboard:</strong> ← → previous/next page · Page Up/Down
         </p>
       </div>
 

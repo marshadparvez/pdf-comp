@@ -1,6 +1,6 @@
 # PDF Comparison Tool
 
-**v0.4** — A dual-pipeline PDF comparison web application that supports both speed and accuracy modes for comparing PDF documents.
+**v0.5** — A dual-pipeline PDF comparison web application that supports both speed and accuracy modes for comparing PDF documents.
 
 ## Features
 
@@ -120,6 +120,9 @@ Set environment variables to tune comparison behavior:
 - `PDF_DIFF_JACCARD_THRESHOLD` — Same-page move threshold 0–1 (default: 0.95). Higher = stricter (edited stays red+green).
 - `PDF_DIFF_MIN_WORDS` — Min words in a box to consider for same-page move (default: 3).
 - `PDF_DIFF_SIZE_RATIO` — Min size ratio (min/max word count) for pairing (default: 0.5).
+- `PDF_DIFF_MIN_CROSS_PAGE_MOVE_WORDS` — Min words in a run to count as cross-page moved (default: 4). Reduces noise.
+- `PDF_DIFF_NORMALIZE_TEXT` — Set to `false` to disable text normalization (lowercase, collapse spaces, strip punctuation) before diff. Default: `true`.
+- `PDF_DIFF_USE_PDFPLUMBER_SPEED` — Set to `false` to use PyMuPDF only in Speed mode. Default: `true` (use pdfplumber when installed).
 
 ### Frontend configuration
 
@@ -154,8 +157,13 @@ Create `frontend/.env` (see `frontend/.env.example`) and optionally set:
 
 For very large files (e.g., 800+ pages), Speed mode is recommended by default.
 
-## Changelog / v0.4
+## Changelog
 
+### v0.5
+- **Backend**: Text normalization before diff (lowercase, collapse spaces, strip punctuation) to reduce false changes; pdfplumber for Speed word extraction when installed (better on tables/columns); cross-page move minimum run length (configurable, default 4 words); parallel extraction of both PDFs in Accuracy mode; `low_confidence_pages` in API response for pages with very few words.
+- **Frontend**: Low-confidence warning banner with optional list of affected pages when comparison may be incomplete.
+
+### v0.4
 - **Backend**: Moved content (blue) on both PDFs for same-page (Jaccard) and cross-page moves; tunable thresholds via `config.py` and env vars; real similarity score (SequenceMatcher); bounds checks for differing page counts; Speed mode skips OCR when not needed to avoid hangs.
 - **Frontend**: Moved-content legend and per-page stats; filter pages by change type (added/removed/moved); dark mode; export report (HTML); keyboard shortcuts (arrows, Page Up/Down); 130s request timeout with retry; accessibility (aria-labels); compact legend and loading state with mode.
 

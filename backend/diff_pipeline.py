@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import re
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -11,9 +12,11 @@ from typing import Dict, List, Optional, Tuple
 import fitz
 
 from pdf_utils import (
+    PDFPLUMBER_AVAILABLE,
     WordBox,
     add_highlights,
     extract_words_from_page,
+    extract_words_pdfplumber,
     merge_boxes,
     ocr_words_from_image,
     render_page_image,
@@ -26,16 +29,32 @@ except Exception:  # pragma: no cover - optional dependency
 
 try:
     from config import (
+        MIN_CROSS_PAGE_MOVE_WORDS,
+        NORMALIZE_TEXT_FOR_DIFF,
         SAME_PAGE_MOVE_JACCARD_THRESHOLD,
         SAME_PAGE_MOVE_MIN_WORDS,
         SAME_PAGE_MOVE_SIZE_RATIO,
+        USE_PDFPLUMBER_SPEED,
     )
 except ImportError:
+    MIN_CROSS_PAGE_MOVE_WORDS = 4
+    NORMALIZE_TEXT_FOR_DIFF = True
     SAME_PAGE_MOVE_JACCARD_THRESHOLD = 0.95
     SAME_PAGE_MOVE_MIN_WORDS = 3
     SAME_PAGE_MOVE_SIZE_RATIO = 0.5
+    USE_PDFPLUMBER_SPEED = True
 
 logger = logging.getLogger(__name__)
+
+
+def _normalize_word(text: str) -> str:
+    """Normalize a word for comparison: lowercase, collapse spaces, strip punctuation."""
+    if not text:
+        return ""
+    s = text.strip().lower()
+    s = re.sub(r"\s+", " ", s)
+    s = re.sub(r"[^\w\s]", "", s)  # remove punctuation
+    return s.strip()
 
 
 @dataclass
@@ -60,8 +79,12 @@ class LineBox:
 def diff_word_boxes(
     old_words: List[WordBox], new_words: List[WordBox]
 ) -> Tuple[List[Tuple[float, float, float, float]], List[Tuple[float, float, float, float]]]:
-    old_tokens = [w.text for w in old_words]
-    new_tokens = [w.text for w in new_words]
+    if NORMALIZE_TEXT_FOR_DIFF:
+        old_tokens = [_normalize_word(w.text) for w in old_words]
+        new_tokens = [_normalize_word(w.text) for w in new_words]
+    else:
+        old_tokens = [w.text for w in old_words]
+        new_tokens = [w.text for w in new_words]
     matcher = SequenceMatcher(a=old_tokens, b=new_tokens)
 
     removed_boxes: List[Tuple[float, float, float, float]] = []
@@ -200,14 +223,14 @@ def _filter_same_page_moves(
         for box in removed:
             ws = _words_in_box(old_words, box)
             if len(ws) >= min_words:
-                removed_sets.append(frozenset(w.text.strip().lower() for w in ws))
+                removed_sets.append(frozenset(_normalize_word(w.text) for w in ws))
             else:
                 removed_sets.append(frozenset())
         added_sets: List[frozenset] = []
         for box in added:
             ws = _words_in_box(new_words, box)
             if len(ws) >= min_words:
-                added_sets.append(frozenset(w.text.strip().lower() for w in ws))
+                added_sets.append(frozenset(_normalize_word(w.text) for w in ws))
             else:
                 added_sets.append(frozenset())
 
@@ -738,9 +761,13 @@ def _compare_pdfs(
         for idx, (_, page_idx) in enumerate(new_words_with_page):
             new_page_word_indices.setdefault(page_idx, []).append(idx)
         
-        # Create a global diff to find moved content
-        old_tokens = [w.text for w, _ in old_words_with_page]
-        new_tokens = [w.text for w, _ in new_words_with_page]
+        # Create a global diff to find moved content (use normalized tokens for consistency)
+        if NORMALIZE_TEXT_FOR_DIFF:
+            old_tokens = [_normalize_word(w.text) for w, _ in old_words_with_page]
+            new_tokens = [_normalize_word(w.text) for w, _ in new_words_with_page]
+        else:
+            old_tokens = [w.text for w, _ in old_words_with_page]
+            new_tokens = [w.text for w, _ in new_words_with_page]
         global_matcher = SequenceMatcher(a=old_tokens, b=new_tokens)
         
         # Track which words were matched across different pages (moved content)
@@ -750,7 +777,8 @@ def _compare_pdfs(
         n_old = len(old_words_with_page)
         n_new = len(new_words_with_page)
         for tag, i1, i2, j1, j2 in global_matcher.get_opcodes():
-            if tag != "equal" or (i2 - i1) < 3:
+            run_len = i2 - i1
+            if tag != "equal" or run_len < MIN_CROSS_PAGE_MOVE_WORDS:
                 continue
             if i1 >= n_old or j1 >= n_new or i2 > n_old or j2 > n_new:
                 continue
@@ -842,15 +870,28 @@ def _compare_pdfs(
                 page_diff.status = "unchanged"
         logger.info("Cross-page cleanup complete")
 
-    # Compute real similarity: word-level match ratio via SequenceMatcher
-    old_tokens = [w.text for w, _ in old_words_with_page] if old_words_with_page else []
-    new_tokens = [w.text for w, _ in new_words_with_page] if new_words_with_page else []
-    if old_tokens or new_tokens:
+    # Compute real similarity: word-level match ratio via SequenceMatcher (normalized if enabled)
+    if old_words_with_page or new_words_with_page:
+        if NORMALIZE_TEXT_FOR_DIFF:
+            old_tokens = [_normalize_word(w.text) for w, _ in old_words_with_page]
+            new_tokens = [_normalize_word(w.text) for w, _ in new_words_with_page]
+        else:
+            old_tokens = [w.text for w, _ in old_words_with_page]
+            new_tokens = [w.text for w, _ in new_words_with_page]
         matcher = SequenceMatcher(a=old_tokens, b=new_tokens)
         similarity_score = matcher.ratio()  # 0..1
     else:
-        similarity_score = 1.0 if not old_tokens and not new_tokens else 0.0
+        old_tokens = []
+        new_tokens = []
+        similarity_score = 1.0
     low_confidence = similarity_score < 0.3
+    # Pages with very few words are flagged for low-confidence UX
+    low_confidence_pages: List[int] = []
+    for p in range(max_pages):
+        old_count = len(stored_old_words.get(p, []))
+        new_count = len(stored_new_words.get(p, []))
+        if old_count < 10 or new_count < 10:
+            low_confidence_pages.append(p)
     logger.info("Similarity computed: %.4f (word-level)", similarity_score)
 
     job_id = uuid.uuid4().hex
@@ -874,6 +915,8 @@ def _compare_pdfs(
 
     old_doc_annot.save(annotated_old)
     new_doc_annot.save(annotated_new)
+    n_old_pages = old_doc.page_count
+    n_new_pages = new_doc.page_count
     old_doc_annot.close()
     new_doc_annot.close()
     old_doc.close()
@@ -893,10 +936,22 @@ def _compare_pdfs(
         for p in pages
     ]
 
+    total_old_words = sum(len(stored_old_words.get(i, [])) for i in range(max_pages))
+    total_new_words = sum(len(stored_new_words.get(i, [])) for i in range(max_pages))
+    diagnostics = {
+        "old_pages": n_old_pages,
+        "new_pages": n_new_pages,
+        "total_old_words": total_old_words,
+        "total_new_words": total_new_words,
+        "low_confidence_pages": low_confidence_pages,
+    }
+
     return {
         "job_id": job_id,
         "similarity_score": round(similarity_score, 4),
         "low_confidence": low_confidence,
+        "low_confidence_pages": low_confidence_pages,
+        "diagnostics": diagnostics,
         "pages": report_pages,
         "annotated_old": annotated_old.name,
         "annotated_new": annotated_new.name,
@@ -905,13 +960,25 @@ def _compare_pdfs(
 
 def compare_pdfs_speed(old_path: Path, new_path: Path, output_dir: Path) -> Dict:
     logger.info("Mode: speed (OCR disabled)")
-    return _compare_pdfs(old_path, new_path, output_dir, use_ocr=False)
+    old_words_map: Dict[int, List[WordBox]] = {}
+    new_words_map: Dict[int, List[WordBox]] = {}
+    if USE_PDFPLUMBER_SPEED and PDFPLUMBER_AVAILABLE:
+        old_words_map = extract_words_pdfplumber(old_path)
+        new_words_map = extract_words_pdfplumber(new_path)
+        if old_words_map or new_words_map:
+            logger.info("Using pdfplumber for Speed word extraction")
+    return _compare_pdfs(old_path, new_path, output_dir, old_words_map, new_words_map, use_ocr=False)
 
 
 def compare_pdfs_accuracy(old_path: Path, new_path: Path, output_dir: Path) -> Dict:
     logger.info("Mode: accuracy (unstructured=%s)", "enabled" if partition_pdf else "missing")
-    old_words_map = _extract_unstructured_words(old_path)
-    new_words_map = _extract_unstructured_words(new_path)
+    old_words_map: Dict[int, List[WordBox]] = {}
+    new_words_map: Dict[int, List[WordBox]] = {}
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        fut_old = executor.submit(_extract_unstructured_words, old_path)
+        fut_new = executor.submit(_extract_unstructured_words, new_path)
+        old_words_map = fut_old.result()
+        new_words_map = fut_new.result()
     return _compare_pdfs(old_path, new_path, output_dir, old_words_map, new_words_map)
 
 

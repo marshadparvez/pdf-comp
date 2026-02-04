@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, List, Tuple
+from pathlib import Path
+from typing import Dict, Iterable, List, Tuple
 
 import fitz  # PyMuPDF
 import numpy as np
 import pytesseract
 from PIL import Image
 import cv2
+
+try:
+    import pdfplumber
+    PDFPLUMBER_AVAILABLE = True
+except ImportError:
+    pdfplumber = None  # type: ignore
+    PDFPLUMBER_AVAILABLE = False
 
 
 @dataclass
@@ -30,6 +38,31 @@ def extract_words_from_page(page: fitz.Page) -> List[WordBox]:
             continue
         words.append(WordBox(text=text, bbox=(x0, y0, x1, y1)))
     return words
+
+
+def extract_words_pdfplumber(pdf_path: Path) -> Dict[int, List[WordBox]]:
+    """Extract words per page using pdfplumber (often better on tables/columns). Returns {page_index: [WordBox]}."""
+    if pdfplumber is None:
+        return {}
+    result: Dict[int, List[WordBox]] = {}
+    with pdfplumber.open(pdf_path) as doc:
+        for i, page in enumerate(doc.pages):
+            raw = page.extract_words()
+            if not raw:
+                result[i] = []
+                continue
+            words: List[WordBox] = []
+            for w in raw:
+                text = w.get("text", "").strip()
+                if not text:
+                    continue
+                x0 = float(w.get("x0", 0))
+                top = float(w.get("top", 0))
+                x1 = float(w.get("x1", 0))
+                bottom = float(w.get("bottom", 0))
+                words.append(WordBox(text=text, bbox=(x0, top, x1, bottom)))
+            result[i] = words
+    return result
 
 
 def ocr_words_from_image(image: Image.Image) -> List[WordBox]:

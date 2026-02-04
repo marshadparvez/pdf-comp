@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
+import time
 import uuid
 from pathlib import Path
 
@@ -80,6 +81,7 @@ async def compare(
                 )
 
         loop = asyncio.get_event_loop()
+        t0 = time.perf_counter()
         try:
             report = await asyncio.wait_for(
                 loop.run_in_executor(
@@ -94,13 +96,19 @@ async def compare(
                 504,
                 f"Comparison timed out after {COMPARE_TIMEOUT_SECONDS} seconds. Try Speed mode and smaller/fewer pages.",
             )
+        duration_seconds = round(time.perf_counter() - t0, 2)
+        diag = report.get("diagnostics", {})
+        diag["duration_seconds"] = duration_seconds
 
         logger.info(
-            "compare job_id=%s mode=%s similarity=%.4f low_confidence=%s",
+            "compare job_id=%s mode=%s similarity=%.4f low_confidence=%s duration=%.2fs old_words=%s new_words=%s",
             report["job_id"],
             report["mode"],
             report["similarity_score"],
             report["low_confidence"],
+            duration_seconds,
+            diag.get("total_old_words", "?"),
+            diag.get("total_new_words", "?"),
         )
 
         return JSONResponse(
@@ -110,6 +118,8 @@ async def compare(
                 "mode_explanation": report["mode_explanation"],
                 "similarity_score": report["similarity_score"],
                 "low_confidence": report["low_confidence"],
+                "low_confidence_pages": report.get("low_confidence_pages", []),
+                "diagnostics": diag,
                 "pages": report["pages"],
                 "downloads": {
                     "annotated_old": f"/results/{report['annotated_old']}",
