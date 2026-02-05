@@ -31,6 +31,8 @@ try:
     from config import (
         MIN_CROSS_PAGE_MOVE_WORDS,
         NORMALIZE_TEXT_FOR_DIFF,
+        REPLACED_JACCARD_MAX,
+        REPLACED_JACCARD_MIN,
         SAME_PAGE_MOVE_JACCARD_THRESHOLD,
         SAME_PAGE_MOVE_MIN_WORDS,
         SAME_PAGE_MOVE_SIZE_RATIO,
@@ -39,6 +41,8 @@ try:
 except ImportError:
     MIN_CROSS_PAGE_MOVE_WORDS = 4
     NORMALIZE_TEXT_FOR_DIFF = True
+    REPLACED_JACCARD_MIN = 0.35
+    REPLACED_JACCARD_MAX = 0.95
     SAME_PAGE_MOVE_JACCARD_THRESHOLD = 0.95
     SAME_PAGE_MOVE_MIN_WORDS = 3
     SAME_PAGE_MOVE_SIZE_RATIO = 0.5
@@ -280,6 +284,106 @@ def _filter_same_page_moves(
                 page_index + 1,
                 len(page_diff.moved_boxes_old),
                 len(page_diff.moved_boxes_new),
+            )
+
+
+def _boxes_vertically_near(
+    box1: Tuple[float, float, float, float],
+    box2: Tuple[float, float, float, float],
+    tolerance: float = 20.0,
+) -> bool:
+    """True if the two boxes overlap or are within tolerance in the vertical (y) direction."""
+    y1_bottom, y2_bottom = box1[3], box2[3]
+    y1_top, y2_top = box1[1], box2[1]
+    return not (y1_bottom < y2_top - tolerance or y2_bottom < y1_top - tolerance)
+
+
+def _filter_same_page_replaced(
+    pages: List[PageDiff],
+    stored_old_words: Dict[int, List[WordBox]],
+    stored_new_words: Dict[int, List[WordBox]],
+    min_words: Optional[int] = None,
+) -> None:
+    """
+    After same-page move: pair remaining removed (red) and added (green) boxes that are
+    similar but not identical (Jaccard in [REPLACED_MIN, REPLACED_MAX)), e.g. one word
+    replaced ("checking" → "browsing"). Show both as blue (replaced) for consistency with v0.3.11.
+    Only pairs in similar vertical position are considered (same line / nearby).
+    """
+    min_words = min_words if min_words is not None else SAME_PAGE_MOVE_MIN_WORDS
+    size_ratio_min = SAME_PAGE_MOVE_SIZE_RATIO
+    for page_diff in pages:
+        if page_diff.status in ("added_page", "removed_page"):
+            continue
+        if not page_diff.removed_boxes and not page_diff.added_boxes:
+            continue
+        page_index = page_diff.page_index
+        old_words = stored_old_words.get(page_index, [])
+        new_words = stored_new_words.get(page_index, [])
+        if not old_words or not new_words:
+            continue
+
+        removed = page_diff.removed_boxes
+        added = page_diff.added_boxes
+        removed_sets: List[frozenset] = []
+        for box in removed:
+            ws = _words_in_box(old_words, box)
+            if len(ws) >= min_words:
+                removed_sets.append(frozenset(_normalize_word(w.text) for w in ws))
+            else:
+                removed_sets.append(frozenset())
+        added_sets: List[frozenset] = []
+        for box in added:
+            ws = _words_in_box(new_words, box)
+            if len(ws) >= min_words:
+                added_sets.append(frozenset(_normalize_word(w.text) for w in ws))
+            else:
+                added_sets.append(frozenset())
+
+        pairs: List[Tuple[int, int, float]] = []
+        for ri, rset in enumerate(removed_sets):
+            if not rset:
+                continue
+            for ai, aset in enumerate(added_sets):
+                if not aset:
+                    continue
+                common = len(rset & aset)
+                union = len(rset | aset)
+                if union == 0 or common == 0:
+                    continue
+                jaccard = common / union
+                if jaccard < REPLACED_JACCARD_MIN or jaccard >= REPLACED_JACCARD_MAX:
+                    continue
+                size_ratio = min(len(rset), len(aset)) / max(len(rset), len(aset))
+                if size_ratio < size_ratio_min:
+                    continue
+                if not _boxes_vertically_near(removed[ri], added[ai]):
+                    continue
+                pairs.append((ri, ai, jaccard))
+        pairs.sort(key=lambda p: -p[2])
+
+        removed_matched: set = set()
+        added_matched: set = set()
+        for ri, ai, _ in pairs:
+            if ri in removed_matched or ai in added_matched:
+                continue
+            removed_matched.add(ri)
+            added_matched.add(ai)
+
+        if removed_matched or added_matched:
+            page_diff.moved_boxes_old = list(page_diff.moved_boxes_old) + [
+                removed[i] for i in sorted(removed_matched)
+            ]
+            page_diff.moved_boxes_new = list(page_diff.moved_boxes_new) + [
+                added[i] for i in sorted(added_matched)
+            ]
+            page_diff.removed_boxes = [b for i, b in enumerate(removed) if i not in removed_matched]
+            page_diff.added_boxes = [b for i, b in enumerate(added) if i not in added_matched]
+            logger.info(
+                "Page %d: same-page replaced → %d blue (old), %d blue (new)",
+                page_index + 1,
+                len(removed_matched),
+                len(added_matched),
             )
 
 
@@ -747,6 +851,8 @@ def _compare_pdfs(
     # Same-page move detection: suppress red+green when content only moved within the page
     logger.info("Running same-page move detection")
     _filter_same_page_moves(pages, stored_old_words, stored_new_words)
+    logger.info("Running same-page replaced detection (v0.3.11-style)")
+    _filter_same_page_replaced(pages, stored_old_words, stored_new_words)
 
     # Second pass: Cross-page matching to detect moved content
     # This identifies when content moved from one page to another
@@ -770,12 +876,18 @@ def _compare_pdfs(
             new_tokens = [w.text for w, _ in new_words_with_page]
         global_matcher = SequenceMatcher(a=old_tokens, b=new_tokens)
         
-        # Track which words were matched across different pages (moved content)
+        # Track which words were matched across different pages (moved content).
+        # Only mark as "moved" when it's a real reorder, not natural displacement: if a block
+        # appears on a different page only because content above was deleted/inserted, we already
+        # show that as red/green—don't also mark the shifted block as blue (moved).
+        # Heuristic: mark cross-page only when the same old page has other content that stayed
+        # on the same page in the new doc; otherwise the whole page "shifted" (displacement).
         moved_old_word_indices: Dict[int, set] = {}  # old_page -> set of word indices that moved
         moved_new_word_indices: Dict[int, set] = {}  # new_page -> set of word indices that moved from elsewhere
         
         n_old = len(old_words_with_page)
         n_new = len(new_words_with_page)
+        equal_runs: List[Tuple[int, int, int, int, int, int]] = []  # i1, i2, j1, j2, old_page, new_page
         for tag, i1, i2, j1, j2 in global_matcher.get_opcodes():
             run_len = i2 - i1
             if tag != "equal" or run_len < MIN_CROSS_PAGE_MOVE_WORDS:
@@ -784,13 +896,20 @@ def _compare_pdfs(
                 continue
             old_page = old_words_with_page[i1][1]
             new_page = new_words_with_page[j1][1]
+            equal_runs.append((i1, i2, j1, j2, old_page, new_page))
 
-            if old_page != new_page:
-                    # Content moved between pages - mark all words in this sequence
-                    for old_idx in range(i1, i2):
-                        moved_old_word_indices.setdefault(old_page, set()).add(old_idx)
-                    for new_idx in range(j1, j2):
-                        moved_new_word_indices.setdefault(new_page, set()).add(new_idx)
+        # For each old_page, does any equal run from that page appear on the same page in new?
+        old_page_has_same_page_run: Dict[int, bool] = {}
+        for (_i1, _i2, _j1, _j2, op, np) in equal_runs:
+            if op == np:
+                old_page_has_same_page_run[op] = True
+        # Only mark as moved when old_page != new_page AND that old page has some content that stayed
+        for (i1, i2, j1, j2, old_page, new_page) in equal_runs:
+            if old_page != new_page and old_page_has_same_page_run.get(old_page, False):
+                for old_idx in range(i1, i2):
+                    moved_old_word_indices.setdefault(old_page, set()).add(old_idx)
+                for new_idx in range(j1, j2):
+                    moved_new_word_indices.setdefault(new_page, set()).add(new_idx)
         
         # Now filter out moved content from deleted/added boxes
         # We need to map word indices back to boxes

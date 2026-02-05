@@ -36,6 +36,11 @@ SAME_PAGE_MOVE_MIN_WORDS = _int("PDF_DIFF_MIN_WORDS", 3)
 # Same-page move: size ratio (min/max word count). Must be >= this to pair.
 SAME_PAGE_MOVE_SIZE_RATIO = _float("PDF_DIFF_SIZE_RATIO", 0.5)
 
+# Same-page "replaced" (v0.3.11): Jaccard range for one-word/few-word edits (e.g. "checking" → "browsing").
+# Pairs in [REPLACED_JACCARD_MIN, REPLACED_JACCARD_MAX) are shown as blue on both sides. Below min = pure add/remove; >= move threshold = move.
+REPLACED_JACCARD_MIN = _float("PDF_DIFF_REPLACED_JACCARD_MIN", 0.35)
+REPLACED_JACCARD_MAX = _float("PDF_DIFF_REPLACED_JACCARD_MAX", 0.95)
+
 # Cross-page move: only treat runs of at least this many words as "moved" (reduces noise)
 MIN_CROSS_PAGE_MOVE_WORDS = _int("PDF_DIFF_MIN_CROSS_PAGE_MOVE_WORDS", 4)
 

@@ -59,14 +59,19 @@ Once you have **words per page** (with bounding boxes), the rest is one flow.
 
 Result: **added_boxes_by_page** and **removed_boxes_by_page** (lists of bboxes per page).
 
-### 2.5 Cross-page “moved content” cleanup
+### 2.5 Same-page move and replaced (v0.3.11-style)
+
+- **Same-page move:** Removed (red) and added (green) boxes on the same page are compared by Jaccard. If a pair is nearly identical (Jaccard ≥ 0.95), it is treated as **moved** and both drawn **blue**.
+- **Same-page replaced:** Remaining red/green pairs with moderate similarity (Jaccard in [0.35, 0.95)) and in similar vertical position (e.g. one word changed: "checking" → "browsing") are treated as **replaced** and both drawn **blue** so one-word edits are consistent on both sides.
+
+### 2.6 Cross-page "moved content" cleanup
 
 - We have **old_words_with_page** and **new_words_with_page** (flat list of (word, page_index)).
-- **SequenceMatcher** on the two full word sequences finds **equal** stretches of 3+ words.
-- If an equal stretch is on **different** pages (e.g. old page 2 vs new page 4), we mark those words as **moved**.
-- Then we **filter** the added/removed boxes: if a box’s words are mostly “moved” (>30%), we **drop** that box so we don’t show red/green for content that just moved to another page.
+- **SequenceMatcher** on the two full word sequences finds **equal** stretches of 4+ words (config: `MIN_CROSS_PAGE_MOVE_WORDS`).
+- We only mark an equal stretch as **moved** (blue) when it is on **different** pages **and** the **same old page** has at least one other equal run that stayed on the **same page** in the new doc. So content that only **shifted** because a previous paragraph was deleted (natural displacement) is **not** marked as moved—the deletion is already red; the shifted block is not shown as blue.
+- Boxes whose words are mostly "moved" (>30%) are drawn as **blue** (moved) instead of red/green.
 
-### 2.6 Output
+### 2.7 Output
 
 - **add_highlights** draws **red** on the old PDF for `removed_boxes` and **green** on the new PDF for `added_boxes`.
 - PDFs are saved; the API returns job_id, pages (with status and box lists), and download URLs.
@@ -82,6 +87,7 @@ Result: **added_boxes_by_page** and **removed_boxes_by_page** (lists of bboxes p
 | **Header/footer** | Same | Same |
 | **Line alignment (streaming cursor)** | Same | Same |
 | **Adjacent-line merging** | Same | Same |
+| **Same-page move + replaced** | Same | Same |
 | **Cross-page moved cleanup** | Same | Same |
 | **Annotation** | Same | Same |
 
